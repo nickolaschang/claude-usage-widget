@@ -21,6 +21,9 @@ Using it:
 - The widget keeps its nearest screen edges fixed when it changes size, so a pill docked at the
   right edge of the screen stays at the right edge.
 - Right-click for Refresh now, Compact, Always on top, Start with Windows, Exit.
+- Every limit has a small ring gauge next to its percentage, in the card and in the pill. The
+  orange part is what you have left, draining clockwise as you use it. It sweeps in smoothly
+  when it appears or changes, glows softly, and turns red and slowly pulses at 15% or less.
 - Hover a row for the breakdown (input, output, cache write, cache read, cost per model).
 - The dot in the title turns orange while Claude has answered something in the last 2 minutes.
 

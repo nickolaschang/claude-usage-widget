@@ -18,10 +18,11 @@ already keeps on your disk and makes no network requests.
  updated 14:32:05
 ```
 
-Double-click it and it shrinks to a one-line pill:
+Double-click it and it shrinks to a one-line pill, with a small ring gauge next to each
+percentage showing what is left:
 
 ```
- o 5h 57% . wk 82% left
+ o  (O) 5h 57%   (O) wk 82%  left
 ```
 
 This is an unofficial community tool. It is not made by, endorsed by, or affiliated with Anthropic.

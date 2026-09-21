@@ -34,7 +34,9 @@ The floating window needs tkinter:
 
 Using the window: drag to move, double-click to shrink to a one-line pill and again to expand,
 right-click (or Control-click on a Mac) for Refresh now, Compact, Always on top, Quit. Hover a
-row for the breakdown. Position and mode are remembered, and the widget keeps its nearest screen
+row for the breakdown. Every limit has a small ring gauge next to its percentage: the orange part
+is what you have left, it sweeps in smoothly when it changes, and it turns red and slowly pulses
+at 15% or less. Position and mode are remembered, and the widget keeps its nearest screen
 edges fixed when it changes size.
 
 If your window manager mishandles the borderless window (no way to move it, not staying on top,
