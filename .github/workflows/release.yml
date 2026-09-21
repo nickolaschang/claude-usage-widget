@@ -1,0 +1,32 @@
+name: release
+
+# Pushing a tag like v0.1.0 builds one zip per platform and attaches them to that release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build one zip per platform
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          shared="pricing.json README.md LICENSE AGENTS.md"
+          # git archive applies .gitattributes, so .ps1 files come out CRLF and .py files LF.
+          git archive --format=zip --prefix=claude-usage-widget/ -o "claude-usage-widget-windows-${tag}.zip" HEAD windows $shared
+          git archive --format=zip --prefix=claude-usage-widget/ -o "claude-usage-widget-macos-linux-${tag}.zip" HEAD python $shared
+          ls -l *.zip
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "$tag" --generate-notes
+          gh release upload "$tag" claude-usage-widget-*.zip --clobber
