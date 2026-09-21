@@ -3,6 +3,14 @@
 The version here, the `version` in `.claude-plugin/plugin.json`, and the release tag always match.
 Claude Code pins plugin users to that version string, so it is bumped on every release.
 
+## 0.2.1
+
+- Fixed (plugin, Windows): with exactly one widget running, `status` reported "not running" and
+  `start` tried to open a second one.
+- Fixed (plugin): `stop` and `uninstall` matched any process that merely mentioned the widget's
+  script, so they could have closed an unrelated terminal or editor. They now only match a
+  PowerShell or Python that is actually running it. A test with a real decoy process covers this.
+
 ## 0.2.0
 
 - **Claude Code plugin.** The repository is now also a plugin and its own marketplace:
