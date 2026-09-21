@@ -168,6 +168,45 @@ class EntryPoint(unittest.TestCase):
         self.assertEqual(self.settings_now(), existing, "uninstall removes our status line and nothing else")
         self.assertFalse(os.path.exists(self.app))
 
+    def test_a_running_widget_is_found_and_stop_kills_only_the_widget(self):
+        # Two bugs lived here. Exactly one running widget was reported as "not running" (in
+        # PowerShell a single match is one object, and a process object has no Count). And the
+        # match was loose enough that "stop" would have killed any shell that mentioned the file.
+        import time
+        edition, name = ("windows", "ClaudeUsageWidget.ps1") if WINDOWS else ("python", "claude_usage_widget.py")
+        os.makedirs(os.path.join(self.app, edition))
+        stub = os.path.join(self.app, edition, name)
+        with open(stub, "w") as handle:
+            handle.write("Start-Sleep -Seconds 90\n" if WINDOWS else "import time\ntime.sleep(90)\n")
+        if WINDOWS:
+            widget = subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", stub])
+            decoy = subprocess.Popen(["powershell.exe", "-NoProfile", "-Command", "Start-Sleep -Seconds 90 # editing " + stub])
+        else:
+            widget = subprocess.Popen([sys.executable, stub])
+            decoy = subprocess.Popen(["sh", "-c", "sleep 90; : editing '%s'" % stub])
+        try:
+            wanted = "running, pid %d" % widget.pid
+            out = ""
+            for _attempt in range(30):
+                _code, out = self.run_verb("status")
+                if wanted in out:
+                    break
+                time.sleep(0.5)
+            self.assertIn(wanted, out, "one running widget must be reported, with the widget's pid and not the decoy's")
+
+            code, out = self.run_verb("stop")
+            self.assertEqual(code, 0, out)
+            self.assertIn("stopped", out)
+            widget.wait(timeout=20)
+            self.assertIsNone(decoy.poll(), "a process that only mentions the script must survive stop")
+            _code, out = self.run_verb("status")
+            self.assertIn("not running", out)
+        finally:
+            for process in (widget, decoy):
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=20)
+
     def test_someone_elses_status_line_is_refused_with_exit_code_2(self):
         mine = {"statusLine": {"type": "command", "command": "~/.claude/my-own-statusline.sh"}}
         with open(self.settings, "w", encoding="utf-8") as handle:

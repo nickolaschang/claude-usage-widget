@@ -62,11 +62,17 @@ function Sync-App {
 }
 
 function Get-WidgetProcess {
-    # Any copy of the widget counts (a git clone may be running too), unless a test scoped us.
-    $all = Get-CimInstance Win32_Process -Filter "Name='pwsh.exe' OR Name='powershell.exe'" |
-        Where-Object { $_.CommandLine -like '*ClaudeUsageWidget.ps1*' -and $_.CommandLine -notlike '*-SelfTest*' }
-    if ($scoped) { $all = $all | Where-Object { $_.CommandLine -like ('*' + $appDir + '*') } }
-    return @($all)
+    # Only a PowerShell that was started with -File <...>\ClaudeUsageWidget.ps1 is the widget. A
+    # looser match on the file name would also catch a terminal or an editor that merely mentions
+    # the script, and "stop" would kill it. Any copy of the widget counts (a git clone may be
+    # running too), unless a test scoped us to one folder.
+    $pattern = '(?i)-File\s+"?[^"]*[\\/]ClaudeUsageWidget\.ps1"?\s*$'
+    $found = Get-CimInstance Win32_Process -Filter "Name='pwsh.exe' OR Name='powershell.exe'" |
+        Where-Object { $_.CommandLine -match $pattern }
+    if ($scoped) { $found = $found | Where-Object { $_.CommandLine -like ('*' + $appDir + '*') } }
+    # Callers wrap this in @(): a single match comes back as one object, and a process object has
+    # no Count, so ".Count -gt 0" would quietly be false for exactly one running widget.
+    return $found
 }
 
 function Invoke-Installer([string]$Action) {
@@ -86,7 +92,7 @@ switch ($Verb) {
     }
 
     'start' {
-        $running = Get-WidgetProcess
+        $running = @(Get-WidgetProcess)
         if ($running.Count -gt 0) {
             'The widget is already running (pid {0}). Nothing to do.' -f $running[0].ProcessId
             exit 0
@@ -95,7 +101,7 @@ switch ($Verb) {
         Start-Process -FilePath (Join-Path $env:WINDIR 'System32\wscript.exe') -ArgumentList ('"{0}"' -f $launcher)
         foreach ($attempt in 1..20) {
             Start-Sleep -Milliseconds 500
-            $running = Get-WidgetProcess
+            $running = @(Get-WidgetProcess)
             if ($running.Count -gt 0) { break }
         }
         if ($running.Count -eq 0) {
@@ -111,7 +117,7 @@ switch ($Verb) {
     }
 
     'stop' {
-        $running = Get-WidgetProcess
+        $running = @(Get-WidgetProcess)
         if ($running.Count -eq 0) { 'The widget is not running.'; exit 0 }
         foreach ($process in $running) { Stop-Process -Id $process.ProcessId -Force }
         'Widget stopped.'
@@ -128,7 +134,7 @@ switch ($Verb) {
         'Plugin version : {0}' -f (Get-PluginVersion)
         $installed = if (Test-Path -LiteralPath (Join-Path $appDir 'VERSION')) { (Get-Content -LiteralPath (Join-Path $appDir 'VERSION') -Raw).Trim() } else { 'not copied yet' }
         'App copy       : {0} ({1})' -f $appDir, $installed
-        $running = Get-WidgetProcess
+        $running = @(Get-WidgetProcess)
         'Widget         : {0}' -f $(if ($running.Count -gt 0) { 'running, pid ' + $running[0].ProcessId } else { 'not running' })
         $feed = Join-Path $stateDir 'ratelimits.json'
         if (Test-Path -LiteralPath $feed) {
@@ -150,7 +156,7 @@ switch ($Verb) {
     }
 
     'uninstall' {
-        $running = Get-WidgetProcess
+        $running = @(Get-WidgetProcess)
         foreach ($process in $running) { Stop-Process -Id $process.ProcessId -Force }
         if ($running.Count -gt 0) { 'Widget stopped.' }
         if (Test-Path -LiteralPath $installer) { [void](Invoke-Installer 'Remove') }

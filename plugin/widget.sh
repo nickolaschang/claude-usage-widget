@@ -58,8 +58,10 @@ sync_app() {
 }
 
 widget_pids() {
+    # Only a Python that is running the script is the widget. Matching the path alone would also
+    # catch an editor or a shell that merely mentions the file, and "stop" would kill it.
     # pgrep exits 1 when nothing matches; that is not an error here.
-    pgrep -f "$app/python/claude_usage_widget.py" 2>/dev/null || true
+    pgrep -f "[Pp]ython[0-9.]* +$app/python/claude_usage_widget\.py" 2>/dev/null || true
 }
 
 case "$verb" in
