@@ -1,0 +1,16 @@
+{
+  "_comment": "Shared by every edition of the widget. USD per million tokens at API list prices. The first entry whose 'match' text appears in the model id wins, so keep specific entries above general ones and keep the empty match last as the fallback.",
+  "checked": "2026-09-21",
+  "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+  "cache_write_5m_multiplier": 1.25,
+  "cache_write_1h_multiplier": 2.0,
+  "models": [
+    { "match": "fable",    "label": "Fable",  "input": 10.0, "output": 50.0, "cache_read_multiplier": 0.025 },
+    { "match": "mythos",   "label": "Mythos", "input": 10.0, "output": 50.0, "cache_read_multiplier": 0.025 },
+    { "match": "opus",     "label": "Opus",   "input": 5.0,  "output": 25.0, "cache_read_multiplier": 0.1 },
+    { "match": "sonnet-4", "label": "Sonnet", "input": 3.0,  "output": 15.0, "cache_read_multiplier": 0.1 },
+    { "match": "sonnet",   "label": "Sonnet", "input": 2.0,  "output": 10.0, "cache_read_multiplier": 0.1 },
+    { "match": "haiku",    "label": "Haiku",  "input": 1.0,  "output": 5.0,  "cache_read_multiplier": 0.1 },
+    { "match": "",         "label": "Other",  "input": 3.0,  "output": 15.0, "cache_read_multiplier": 0.1 }
+  ]
+}

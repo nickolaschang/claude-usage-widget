@@ -15,14 +15,22 @@
 .PARAMETER SelfTest
     Scan once, print the totals to the console, and exit without opening a window.
 
+.PARAMETER AsJson
+    With -SelfTest, print the totals as JSON instead of text (used by the cross-edition tests).
+
 .PARAMETER ProjectsRoot
     Override the transcripts folder. Defaults to $env:CLAUDE_CONFIG_DIR\projects or
     ~\.claude\projects.
+
+.PARAMETER PricingPath
+    Override the pricing file. Defaults to pricing.json next to this script, then one folder up.
 #>
 [CmdletBinding()]
 param(
     [switch]$SelfTest,
-    [string]$ProjectsRoot
+    [switch]$AsJson,
+    [string]$ProjectsRoot,
+    [string]$PricingPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,25 +38,6 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
-
-# USD per million tokens (input / output), list prices checked 21 Sep 2026 against
-# https://platform.claude.com/docs/en/about-claude/pricing
-# First substring match on the model id wins, so keep specific entries above general ones.
-# The empty Match at the end is the fallback. ReadMult is the cache-read price as a multiple
-# of the input price: Fable and Mythos 5.1 bill cache reads at 0.025x, everything else at 0.1x.
-$script:Pricing = @(
-    [pscustomobject]@{ Match = 'fable';    Label = 'Fable';  In = 10.00; Out = 50.00; ReadMult = 0.025 }
-    [pscustomobject]@{ Match = 'mythos';   Label = 'Mythos'; In = 10.00; Out = 50.00; ReadMult = 0.025 }  # assumed same as Fable
-    [pscustomobject]@{ Match = 'opus';     Label = 'Opus';   In = 5.00;  Out = 25.00; ReadMult = 0.10 }   # Opus 5, Opus 4.8
-    [pscustomobject]@{ Match = 'sonnet-4'; Label = 'Sonnet'; In = 3.00;  Out = 15.00; ReadMult = 0.10 }   # older Sonnet 4.x
-    [pscustomobject]@{ Match = 'sonnet';   Label = 'Sonnet'; In = 2.00;  Out = 10.00; ReadMult = 0.10 }   # Sonnet 5
-    [pscustomobject]@{ Match = 'haiku';    Label = 'Haiku';  In = 1.00;  Out = 5.00;  ReadMult = 0.10 }   # Haiku 4.5
-    [pscustomobject]@{ Match = '';         Label = 'Other';  In = 3.00;  Out = 15.00; ReadMult = 0.10 }
-)
-
-# Cache writes are priced as a multiple of the model's input price (same for every model).
-$script:CacheWrite5mMult = 1.25
-$script:CacheWrite1hMult = 2.00
 
 $script:WindowDays      = 7          # how far back the widget looks
 $script:RefreshSeconds  = 30         # how often to look for new transcript data
@@ -83,6 +72,38 @@ function Write-WidgetLog([string]$Message) {
 trap {
     Write-WidgetLog ('unhandled: {0} (line {1})' -f $_.Exception.Message, $_.InvocationInfo.ScriptLineNumber)
     break
+}
+
+# Prices live in pricing.json, shared with the Python edition so the two can never drift apart.
+# The first entry whose 'match' text appears in the model id wins; the empty match is the fallback.
+$script:PricingWarning = $null
+if (-not $PricingPath) {
+    $candidates = @((Join-Path $PSScriptRoot 'pricing.json'), (Join-Path (Split-Path -Parent $PSScriptRoot) 'pricing.json'))
+    $PricingPath = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+}
+$script:Pricing = @()
+$script:CacheWrite5mMult = 1.25
+$script:CacheWrite1hMult = 2.00
+try {
+    if (-not $PricingPath) { throw 'pricing.json not found next to the script or one folder up' }
+    $pricingJson = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $PricingPath -Raw)
+    $script:CacheWrite5mMult = [double]$pricingJson.cache_write_5m_multiplier
+    $script:CacheWrite1hMult = [double]$pricingJson.cache_write_1h_multiplier
+    $script:Pricing = @(foreach ($m in $pricingJson.models) {
+        [pscustomobject]@{
+            Match = ([string]$m.match).ToLowerInvariant(); Label = [string]$m.label
+            In = [double]$m.input; Out = [double]$m.output; ReadMult = [double]$m.cache_read_multiplier
+        }
+    })
+    if ($script:Pricing.Count -eq 0) { throw 'pricing.json has no models' }
+} catch {
+    $script:PricingWarning = 'pricing.json problem, costs are rough'
+    Write-WidgetLog ('pricing: {0}' -f $_.Exception.Message)
+    $script:Pricing = @()
+}
+# Whatever the file says, always end with a catch-all so every model gets a rate.
+if (-not ($script:Pricing | Where-Object { $_.Match -eq '' })) {
+    $script:Pricing += [pscustomobject]@{ Match = ''; Label = 'Other'; In = 3.0; Out = 15.0; ReadMult = 0.1 }
 }
 
 # ---------------------------------------------------------------------------
@@ -453,6 +474,20 @@ if ($SelfTest) {
     while (Invoke-ScanStep) { }
     $sw.Stop()
     $s = Get-UsageSummary
+    if ($AsJson) {
+        # Same shape as the Python edition's --format json, so the two engines can be compared.
+        $out = [ordered]@{ responses = $script:Seen.Count }
+        foreach ($pair in @(@('H5', 'h5'), @('Today', 'today'), @('D7', 'd7'))) {
+            $b = $s[$pair[0]]
+            $out[$pair[1]] = [ordered]@{
+                cost = [Math]::Round([double]$b.Cost, 6); input = $b.In; output = $b.Out
+                cache_write = $b.CacheW; cache_read = $b.CacheR; responses = $b.Msgs
+            }
+        }
+        $out | ConvertTo-Json -Depth 4
+        return
+    }
+    if ($script:PricingWarning) { 'WARNING          : {0}' -f $script:PricingWarning }
     'Transcripts root : {0}' -f $script:ProjectsRoot
     'Files scanned    : {0} in {1:0.0}s' -f $fileCount, $sw.Elapsed.TotalSeconds
     'Unique responses : {0:N0}' -f $script:Seen.Count
@@ -755,7 +790,7 @@ function Update-View {
     if ($script:Queue.Count -gt 0) {
         $ui.Footer.Text = 'scanning {0} of {1} files' -f ($script:ScanTotal - $script:Queue.Count + 1), $script:ScanTotal
     } else {
-        $ui.Footer.Text = 'updated {0:HH:mm:ss}' -f (Get-Date)
+        $ui.Footer.Text = if ($script:PricingWarning) { $script:PricingWarning } else { 'updated {0:HH:mm:ss}' -f (Get-Date) }
     }
 }
 
