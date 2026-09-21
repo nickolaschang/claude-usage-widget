@@ -530,7 +530,7 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Claude Usage" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Title="Usage Widget" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize" SizeToContent="WidthAndHeight"
         WindowStartupLocation="Manual" UseLayoutRounding="True" SnapsToDevicePixels="True"
         FontFamily="Segoe UI" FontSize="12" Foreground="#F3F1EA">
@@ -587,7 +587,7 @@ $xaml = @'
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <Ellipse x:Name="TitleDot" Width="7" Height="7" Fill="#5A5853" VerticalAlignment="Center" Margin="0,1,7,0"/>
-        <TextBlock Grid.Column="1" Text="CLAUDE USAGE" FontSize="10" FontWeight="SemiBold" Foreground="#9C9A92"
+        <TextBlock Grid.Column="1" Text="CLAUDE CODE USAGE" FontSize="10" FontWeight="SemiBold" Foreground="#9C9A92"
                    VerticalAlignment="Center" ToolTip="Double-click to shrink"/>
         <TextBlock x:Name="CloseGlyph" Grid.Column="2" Text="&#215;" FontSize="15" Foreground="#6F6C66"
                    Padding="6,0,0,0" Margin="0,-4,-2,-2" Cursor="Hand" ToolTip="Close"/>
@@ -671,7 +671,16 @@ $script:Dot         = [string][char]0x00B7
 $script:Compact     = $false          # compact pill vs full card; toggled by double-click
 $script:Positioned  = $false          # true once the window has been placed; gates anchoring and state saves
 
-$script:StartupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude Usage Widget.lnk'
+$script:StartupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'Usage Widget.lnk'
+# The shortcut was called 'Claude Usage Widget.lnk' before 0.2.2. Carry an existing one over to
+# the new name, so Start with Windows keeps working and the menu tick stays truthful.
+$script:LegacyStartupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude Usage Widget.lnk'
+try {
+    if (Test-Path -LiteralPath $script:LegacyStartupLink) {
+        if (Test-Path -LiteralPath $script:StartupLink) { Remove-Item -LiteralPath $script:LegacyStartupLink -Force }
+        else { Move-Item -LiteralPath $script:LegacyStartupLink -Destination $script:StartupLink }
+    }
+} catch { Write-WidgetLog ('startup shortcut rename: {0}' -f $_.Exception.Message) }
 $script:LauncherVbs = Join-Path $PSScriptRoot 'Start-ClaudeUsageWidget.vbs'
 
 $script:ColorAccent = [System.Windows.Media.ColorConverter]::ConvertFromString('#D97757')
@@ -999,7 +1008,7 @@ function Set-StartupShortcut([bool]$Enable) {
         $link.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
         $link.Arguments = '"{0}"' -f $script:LauncherVbs
         $link.WorkingDirectory = $PSScriptRoot
-        $link.Description = 'Claude usage widget'
+        $link.Description = 'Usage widget for Claude Code'
         $link.Save()
     } elseif (Test-Path -LiteralPath $script:StartupLink) {
         Remove-Item -LiteralPath $script:StartupLink -Force

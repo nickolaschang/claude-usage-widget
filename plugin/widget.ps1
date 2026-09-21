@@ -42,7 +42,8 @@ $stateDir = Join-Path $env:LOCALAPPDATA 'ClaudeUsageWidget'
 $widgetScript = Join-Path $appDir 'windows\ClaudeUsageWidget.ps1'
 $installer = Join-Path $appDir 'windows\Install-StatusLine.ps1'
 $launcher = Join-Path $appDir 'windows\Start-ClaudeUsageWidget.vbs'
-$startupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude Usage Widget.lnk'
+# 'Claude Usage Widget.lnk' is what the shortcut was called before 0.2.2.
+$startupLinks = 'Usage Widget.lnk', 'Claude Usage Widget.lnk' | ForEach-Object { Join-Path ([Environment]::GetFolderPath('Startup')) $_ }
 
 function Get-PluginVersion {
     try { return [string](ConvertFrom-Json -InputObject (Get-Content -LiteralPath (Join-Path $pluginRoot '.claude-plugin\plugin.json') -Raw)).version }
@@ -160,9 +161,11 @@ switch ($Verb) {
         foreach ($process in $running) { Stop-Process -Id $process.ProcessId -Force }
         if ($running.Count -gt 0) { 'Widget stopped.' }
         if (Test-Path -LiteralPath $installer) { [void](Invoke-Installer 'Remove') }
-        if (-not $scoped -and (Test-Path -LiteralPath $startupLink)) {
-            Remove-Item -LiteralPath $startupLink -Force
-            'Removed the Start with Windows shortcut.'
+        foreach ($link in $startupLinks) {
+            if (-not $scoped -and (Test-Path -LiteralPath $link)) {
+                Remove-Item -LiteralPath $link -Force
+                'Removed the Start with Windows shortcut.'
+            }
         }
         if (Test-Path -LiteralPath $appDir) {
             Remove-Item -LiteralPath $appDir -Recurse -Force
