@@ -22,7 +22,7 @@ jobs:
       - name: Build and unpack both zips the way the release workflow does
         shell: bash
         run: |
-          shared="pricing.json README.md LICENSE AGENTS.md"
+          shared="pricing.json README.md LICENSE AGENTS.md docs"
           git archive --format=zip --prefix=w/ -o w.zip HEAD windows $shared
           git archive --format=zip --prefix=p/ -o p.zip HEAD python $shared
           mkdir out && cd out && unzip -q ../w.zip && unzip -q ../p.zip

@@ -6,24 +6,10 @@ A tiny always-on-top desktop widget that shows how much Claude Code you have bee
 much of your 5 hour and weekly limits you have left. Fully local: it reads the files Claude Code
 already keeps on your disk and makes no network requests.
 
-```
- o CLAUDE CODE USAGE          x
-              est. cost  tokens
- Last 5h        $12.40    18.2M
- Today          $31.02    44.9M
- 7 days        $214.77     310M
- 5h limit      57% left . resets 2h 10m
- Week          82% left . resets 3d 4h
- Fable 61%   Opus 35%   Haiku 4%
- updated 14:32:05
-```
+![The usage widget: the full card on the left, and the one-line pill it shrinks to on the right](docs/screenshot.png)
 
-Double-click it and it shrinks to a one-line pill, with a small ring gauge next to each
-percentage showing what is left:
-
-```
- o  (O) 5h 57%   (O) wk 82%  left
-```
+*Sample numbers. Double-click the card and it shrinks to the pill on the right. Each ring shows
+how much of that limit is left, and turns red and pulses at 15% or less.*
 
 This is an unofficial community tool. It is not made by, endorsed by, or affiliated with Anthropic.
 

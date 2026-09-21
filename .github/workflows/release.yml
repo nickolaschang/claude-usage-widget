@@ -27,7 +27,7 @@ jobs:
       - name: Build one zip per platform
         run: |
           tag="${GITHUB_REF_NAME}"
-          shared="pricing.json README.md LICENSE AGENTS.md"
+          shared="pricing.json README.md LICENSE AGENTS.md docs"
           # git archive applies .gitattributes, so .ps1 files come out CRLF and .py files LF.
           git archive --format=zip --prefix=usage-widget/ -o "usage-widget-windows-${tag}.zip" HEAD windows $shared
           git archive --format=zip --prefix=usage-widget/ -o "usage-widget-macos-linux-${tag}.zip" HEAD python $shared
