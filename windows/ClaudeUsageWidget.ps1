@@ -634,6 +634,7 @@ $xaml = @'
 
     <StackPanel x:Name="CompactView" Orientation="Horizontal" Visibility="Collapsed">
       <Ellipse x:Name="CompactDot" Width="7" Height="7" Fill="#5A5853" VerticalAlignment="Center" Margin="0,1,7,0"/>
+      <StackPanel x:Name="CompactItems" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed"/>
       <TextBlock x:Name="CompactText" FontFamily="Cascadia Mono, Consolas" FontSize="12" Foreground="#F3F1EA"
                  VerticalAlignment="Center" Text="..."/>
     </StackPanel>
@@ -652,7 +653,7 @@ try {
 $script:UI = @{}
 foreach ($name in 'Card', 'TitleDot', 'CloseGlyph', 'Lbl5h', 'Cost5h', 'Tok5h', 'LblToday', 'CostToday', 'TokToday',
                   'Lbl7d', 'Cost7d', 'Tok7d', 'LimitsPanel', 'LimitRows', 'LimitsAsOf',
-                  'ModelSplit', 'Footer', 'FullView', 'CompactView', 'CompactDot', 'CompactText',
+                  'ModelSplit', 'Footer', 'FullView', 'CompactView', 'CompactDot', 'CompactItems', 'CompactText',
                   'MiRefresh', 'MiCompact', 'MiTop', 'MiStartup', 'MiExit') {
     $script:UI[$name] = $script:Window.FindName($name)
 }
@@ -673,47 +674,164 @@ $script:Positioned  = $false          # true once the window has been placed; ga
 $script:StartupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude Usage Widget.lnk'
 $script:LauncherVbs = Join-Path $PSScriptRoot 'Start-ClaudeUsageWidget.vbs'
 
-function Add-LimitRow($limit) {
-    # Label on the left, "NN% left . resets 3d 4h" on the right, and a bar that drains as the
-    # allowance is used (full = plenty left), turning red for the last 15%.
+$script:ColorAccent = [System.Windows.Media.ColorConverter]::ConvertFromString('#D97757')
+$script:ColorHot    = [System.Windows.Media.ColorConverter]::ConvertFromString('#E5484D')
+$script:LowPercent  = 15              # at or below this much left, a limit turns red and its ring pulses
+
+function New-Easing([string]$Kind) {
+    $ease = if ($Kind -eq 'Sine') { New-Object System.Windows.Media.Animation.SineEase } else { New-Object System.Windows.Media.Animation.CubicEase }
+    $ease.EasingMode = if ($Kind -eq 'Sine') { [System.Windows.Media.Animation.EasingMode]::EaseInOut } else { [System.Windows.Media.Animation.EasingMode]::EaseOut }
+    return $ease
+}
+
+function New-Ring([double]$Diameter, [double]$Thickness) {
+    # A ring gauge: a dim track with a glowing arc on top showing what is LEFT, draining clockwise
+    # from 12 o'clock. The arc is really a full-circle dash whose StrokeDashOffset hides the used
+    # part. That single number can be animated, which a true arc geometry cannot.
+    $units = [Math]::PI * ($Diameter - $Thickness) / $Thickness     # circumference, in multiples of the thickness
     $grid = New-Object System.Windows.Controls.Grid
-    $colLabel = New-Object System.Windows.Controls.ColumnDefinition
-    $colValue = New-Object System.Windows.Controls.ColumnDefinition
-    $colValue.Width = [System.Windows.GridLength]::Auto
-    [void]$grid.ColumnDefinitions.Add($colLabel)
-    [void]$grid.ColumnDefinitions.Add($colValue)
+    $grid.Width = $Diameter
+    $grid.Height = $Diameter
+    $grid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+    $track = New-Object System.Windows.Shapes.Ellipse
+    $track.Stroke = $script:BrushTrack
+    $track.StrokeThickness = $Thickness
+
+    $arc = New-Object System.Windows.Shapes.Ellipse
+    $arc.StrokeThickness = $Thickness
+    $arc.StrokeDashCap = [System.Windows.Media.PenLineCap]::Round
+    $dashes = New-Object System.Windows.Media.DoubleCollection
+    $dashes.Add($units)
+    $dashes.Add($units)
+    $arc.StrokeDashArray = $dashes
+    $arc.StrokeDashOffset = $units                                   # empty to begin with, then it sweeps in
+    $arc.RenderTransformOrigin = New-Object System.Windows.Point 0.5, 0.5
+    $arc.RenderTransform = New-Object System.Windows.Media.RotateTransform -90
+
+    $glow = New-Object System.Windows.Media.Effects.DropShadowEffect
+    $glow.ShadowDepth = 0
+    $glow.BlurRadius = 7
+    $glow.Opacity = 0.8
+    $arc.Effect = $glow
+
+    [void]$grid.Children.Add($track)
+    [void]$grid.Children.Add($arc)
+    return @{ Grid = $grid; Arc = $arc; Glow = $glow; Units = $units; Left = -1.0; Low = $null }
+}
+
+function Set-RingValue($ring, [double]$Left) {
+    $Left = [Math]::Max(0, [Math]::Min(100, $Left))
+    $low = $Left -le $script:LowPercent
+    if ($ring.Low -ne $low) {
+        $ring.Low = $low
+        $ring.Arc.Stroke = if ($low) { $script:BrushHot } else { $script:BrushAccent }
+        $ring.Glow.Color = if ($low) { $script:ColorHot } else { $script:ColorAccent }
+        if ($low) {
+            # Breathe while a limit is nearly gone. 20 frames a second is plenty for a slow fade.
+            $pulse = New-Object System.Windows.Media.Animation.DoubleAnimation
+            $pulse.From = 1.0
+            $pulse.To = 0.35
+            $pulse.Duration = New-Object System.Windows.Duration ([TimeSpan]::FromMilliseconds(950))
+            $pulse.AutoReverse = $true
+            $pulse.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+            $pulse.EasingFunction = New-Easing 'Sine'
+            [System.Windows.Media.Animation.Timeline]::SetDesiredFrameRate($pulse, 20)
+            $ring.Arc.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $pulse)
+        } else {
+            $ring.Arc.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $null)
+        }
+    }
+    if ([Math]::Abs($ring.Left - $Left) -lt 0.05) { return }
+    $ring.Left = $Left
+
+    # No From: the sweep starts wherever the arc is right now, even in the middle of another sweep.
+    $sweep = New-Object System.Windows.Media.Animation.DoubleAnimation
+    $sweep.To = $ring.Units * (1 - $Left / 100)
+    $sweep.Duration = New-Object System.Windows.Duration ([TimeSpan]::FromMilliseconds(1100))
+    $sweep.EasingFunction = New-Easing 'Cubic'
+    $ring.Arc.BeginAnimation([System.Windows.Shapes.Shape]::StrokeDashOffsetProperty, $sweep)
+}
+
+# Limit rows and pill items are built once and then updated in place. Rebuilding them on every
+# refresh would restart the ring animations each time and make tooltips flicker.
+$script:LimitRows = @{}               # window name -> the row's parts
+$script:LimitRowOrder = $null
+$script:PillItems = @{}
+$script:PillOrder = $null
+
+function New-LimitRow($limit) {
+    # Label on the left; ring, then "NN% left . resets 3d 4h" on the right; and a bar underneath.
+    # Ring and bar both drain as the allowance is used, and turn red for the last 15%.
+    $grid = New-Object System.Windows.Controls.Grid
+    foreach ($width in 'Star', 'Auto', 'Auto') {
+        $column = New-Object System.Windows.Controls.ColumnDefinition
+        if ($width -eq 'Auto') { $column.Width = [System.Windows.GridLength]::Auto }
+        [void]$grid.ColumnDefinitions.Add($column)
+    }
 
     $label = New-Object System.Windows.Controls.TextBlock
     $label.Style = $script:StyleLabel
     $label.Text = $limit.Label
 
+    $ring = New-Ring 12 2.2
+    $ring.Grid.Margin = [System.Windows.Thickness]::new(12, 0, 0, 0)
+    [System.Windows.Controls.Grid]::SetColumn($ring.Grid, 1)
+
+    $value = New-Object System.Windows.Controls.TextBlock
+    $value.Style = $script:StyleDim
+    $value.Margin = [System.Windows.Thickness]::new(6, 2, 0, 2)
+    [System.Windows.Controls.Grid]::SetColumn($value, 2)
+
+    [void]$grid.Children.Add($label)
+    [void]$grid.Children.Add($ring.Grid)
+    [void]$grid.Children.Add($value)
+
+    $bar = New-Object System.Windows.Controls.ProgressBar
+    $bar.Height = 4
+    $bar.Minimum = 0
+    $bar.Maximum = 100
+    $bar.Value = 0
+    $bar.Background = $script:BrushTrack
+    $bar.BorderThickness = [System.Windows.Thickness]::new(0)
+    $bar.Margin = [System.Windows.Thickness]::new(0, 1, 0, 5)
+
+    [void]$script:UI.LimitRows.Children.Add($grid)
+    [void]$script:UI.LimitRows.Children.Add($bar)
+    return @{ Grid = $grid; Value = $value; Ring = $ring; Bar = $bar }
+}
+
+function Update-LimitRow($row, $limit) {
     $text = '{0:0}% left' -f $limit.Left
     $tip = '{0:0}% used' -f $limit.Used
     if ($null -ne $limit.Resets) {
         $text = '{0} {1} resets {2}' -f $text, $script:Dot, (Format-Span ($limit.Resets - [datetime]::UtcNow))
         $tip = '{0}, resets {1:ddd d MMM HH:mm}' -f $tip, $limit.Resets.ToLocalTime()
     }
-    $value = New-Object System.Windows.Controls.TextBlock
-    $value.Style = $script:StyleDim
-    $value.Text = $text
-    [System.Windows.Controls.Grid]::SetColumn($value, 1)
-    [void]$grid.Children.Add($label)
-    [void]$grid.Children.Add($value)
-    $grid.ToolTip = $tip
+    $row.Value.Text = $text
+    $row.Grid.ToolTip = $tip
+    $row.Bar.ToolTip = $tip
+    $row.Bar.Foreground = if ($limit.Left -le $script:LowPercent) { $script:BrushHot } else { $script:BrushAccent }
+    Set-RingValue $row.Ring $limit.Left
 
-    $bar = New-Object System.Windows.Controls.ProgressBar
-    $bar.Height = 4
-    $bar.Minimum = 0
-    $bar.Maximum = 100
-    $bar.Value = $limit.Left
-    $bar.Background = $script:BrushTrack
-    $bar.Foreground = if ($limit.Left -le 15) { $script:BrushHot } else { $script:BrushAccent }
-    $bar.BorderThickness = [System.Windows.Thickness]::new(0)
-    $bar.Margin = [System.Windows.Thickness]::new(0, 1, 0, 5)
-    $bar.ToolTip = $tip
+    $slide = New-Object System.Windows.Media.Animation.DoubleAnimation
+    $slide.To = $limit.Left
+    $slide.Duration = New-Object System.Windows.Duration ([TimeSpan]::FromMilliseconds(1100))
+    $slide.EasingFunction = New-Easing 'Cubic'
+    $row.Bar.BeginAnimation([System.Windows.Controls.Primitives.RangeBase]::ValueProperty, $slide)
+}
 
-    [void]$script:UI.LimitRows.Children.Add($grid)
-    [void]$script:UI.LimitRows.Children.Add($bar)
+function New-PillItem([bool]$First) {
+    # One ring and its "5h 84%" text.
+    $ring = New-Ring 14 2.6
+    $ring.Grid.Margin = [System.Windows.Thickness]::new($(if ($First) { 0 } else { 11 }), 0, 6, 0)
+    $text = New-Object System.Windows.Controls.TextBlock
+    $text.FontFamily = $script:UI.CompactText.FontFamily
+    $text.FontSize = 12
+    $text.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    [void]$script:UI.CompactItems.Children.Add($ring.Grid)
+    [void]$script:UI.CompactItems.Children.Add($text)
+    return @{ Ring = $ring; Text = $text }
 }
 
 function Update-View {
@@ -736,12 +854,19 @@ function Update-View {
     $ui.ModelSplit.Text = if ($split) { $split } else { 'no usage yet today' }
 
     $rl = Read-RateLimits
-    $ui.LimitRows.Children.Clear()
+    $order = if ($null -ne $rl) { @($rl.Windows | ForEach-Object { $_.Name }) -join '|' } else { '' }
+    if ($order -ne $script:LimitRowOrder) {
+        # The set of windows changed (first reading, or the feed came or went): rebuild the rows once.
+        $script:LimitRowOrder = $order
+        $script:LimitRows = @{}
+        $ui.LimitRows.Children.Clear()
+        if ($null -ne $rl) { foreach ($limit in $rl.Windows) { $script:LimitRows[$limit.Name] = New-LimitRow $limit } }
+    }
     if ($null -eq $rl) {
         $ui.LimitsPanel.Visibility = [System.Windows.Visibility]::Collapsed
     } else {
         $ui.LimitsPanel.Visibility = [System.Windows.Visibility]::Visible
-        foreach ($limit in $rl.Windows) { Add-LimitRow $limit }
+        foreach ($limit in $rl.Windows) { Update-LimitRow $script:LimitRows[$limit.Name] $limit }
 
         # The feed only moves while a Claude Code session is open, so say so once it gets old.
         $readAt = $rl.Updated.ToLocalTime()
@@ -766,22 +891,45 @@ function Update-View {
         $short = @{ five_hour = '5h'; seven_day = 'wk' }
         $shown = @($rl.Windows | Where-Object { $short.ContainsKey($_.Name) })
         if ($shown.Count -eq 0) { $shown = @($rl.Windows | Select-Object -First 2) }
-        $bits = foreach ($limit in $shown) {
-            $tag = if ($short.ContainsKey($limit.Name)) { $short[$limit.Name] } else { $limit.Label }
-            '{0} {1:0}%' -f $tag, $limit.Left
+        $pillOrder = @($shown | ForEach-Object { $_.Name }) -join '|'
+        if ($pillOrder -ne $script:PillOrder) {
+            $script:PillOrder = $pillOrder
+            $script:PillItems = @{}
+            $ui.CompactItems.Children.Clear()
+            $first = $true
+            foreach ($limit in $shown) { $script:PillItems[$limit.Name] = New-PillItem $first; $first = $false }
+            $suffix = New-Object System.Windows.Controls.TextBlock
+            $suffix.Text = 'left'
+            $suffix.FontFamily = $ui.CompactText.FontFamily
+            $suffix.FontSize = 12
+            $suffix.Foreground = $ui.Footer.Foreground
+            $suffix.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+            $suffix.Margin = [System.Windows.Thickness]::new(6, 0, 0, 0)
+            [void]$ui.CompactItems.Children.Add($suffix)
         }
-        $ui.CompactText.Text = (@($bits) -join $sep) + ' left'
-        $lowest = 100.0
+        foreach ($limit in $shown) {
+            $item = $script:PillItems[$limit.Name]
+            $tag = if ($short.ContainsKey($limit.Name)) { $short[$limit.Name] } else { $limit.Label }
+            $item.Text.Text = '{0} {1:0}%' -f $tag, $limit.Left
+            $item.Text.Foreground = if ($limit.Left -le $script:LowPercent) { $script:BrushHot } else { $script:BrushText }
+            Set-RingValue $item.Ring $limit.Left
+        }
+        $ui.CompactItems.Visibility = [System.Windows.Visibility]::Visible
+        $ui.CompactText.Visibility = [System.Windows.Visibility]::Collapsed
         foreach ($limit in $rl.Windows) {
-            if ($limit.Left -lt $lowest) { $lowest = $limit.Left }
             $line = '{0}: {1:0}% left' -f $limit.Label, $limit.Left
             if ($null -ne $limit.Resets) { $line = '{0}, resets {1}' -f $line, (Format-Span ($limit.Resets - [datetime]::UtcNow)) }
             $tipLines += $line
         }
-        $ui.CompactText.Foreground = if ($lowest -le 15) { $script:BrushHot } else { $script:BrushText }
     } else {
+        if ($script:PillOrder -ne '') {
+            $script:PillOrder = ''
+            $script:PillItems = @{}
+            $ui.CompactItems.Children.Clear()
+        }
+        $ui.CompactItems.Visibility = [System.Windows.Visibility]::Collapsed
+        $ui.CompactText.Visibility = [System.Windows.Visibility]::Visible
         $ui.CompactText.Text = '5h {0}{1}today {2}' -f (Format-Cost $s.H5.Cost), $sep, (Format-Cost $s.Today.Cost)
-        $ui.CompactText.Foreground = $script:BrushText
     }
     $tipLines += 'Last 5h {0}   Today {1}   7 days {2}' -f (Format-Cost $s.H5.Cost), (Format-Cost $s.Today.Cost), (Format-Cost $s.D7.Cost)
     $tipLines += 'Double-click to expand'
@@ -830,6 +978,18 @@ function Set-CompactMode([bool]$On) {
         $ui.Card.Padding = [System.Windows.Thickness]::new(13, 9, 13, 9)
     }
     $ui.MiCompact.IsChecked = $On
+
+    if ($script:Positioned) {
+        # A little flourish: the rings of the view that just appeared sweep in from empty.
+        $parts = if ($On) { $script:PillItems.Values } else { $script:LimitRows.Values }
+        foreach ($part in $parts) {
+            $ring = $part.Ring
+            $ring.Arc.BeginAnimation([System.Windows.Shapes.Shape]::StrokeDashOffsetProperty, $null)
+            $ring.Arc.StrokeDashOffset = $ring.Units
+            $ring.Left = -1.0
+        }
+        try { Update-View } catch { }
+    }
 }
 
 function Set-StartupShortcut([bool]$Enable) {
