@@ -3,6 +3,20 @@
 The version here, the `version` in `.claude-plugin/plugin.json`, and the release tag always match.
 Claude Code pins plugin users to that version string, so it is bumped on every release.
 
+## 0.2.2
+
+- **Renamed to `usage-widget`.** The repository is now `nickolaschang/usage-widget` (the old
+  address redirects), so the plugin, its marketplace and the repository all share one name, and
+  none of them uses Anthropic's marks. Anthropic's terms allow describing what a product works
+  with ("for Claude Code") but not using "Claude" inside the product's own name. The install
+  command is now `/plugin marketplace add nickolaschang/usage-widget`.
+- The window title is "Usage Widget", the header reads "CLAUDE CODE USAGE", and release zips are
+  named `usage-widget-<platform>-<version>.zip`.
+- Windows: the Start with Windows shortcut is now `Usage Widget.lnk`. An existing
+  `Claude Usage Widget.lnk` is renamed automatically the next time the widget starts.
+- Unchanged on purpose: the state folder, environment variables and script file names, so
+  existing settings, window positions and status line paths keep working.
+
 ## 0.2.1
 
 - Fixed (plugin, Windows): with exactly one widget running, `status` reported "not running" and
@@ -14,7 +28,7 @@ Claude Code pins plugin users to that version string, so it is bumped on every r
 ## 0.2.0
 
 - **Claude Code plugin.** The repository is now also a plugin and its own marketplace:
-  `/plugin marketplace add nickolaschang/claude-usage-widget`, then
+  `/plugin marketplace add nickolaschang/usage-widget`, then
   `/plugin install usage-widget@usage-widget`. Skills: `start`, `stop`, `usage` (numbers in the
   chat, no window), `status`, `setup` (the status line feed) and `uninstall`.
 - The plugin never runs anything from its own folder, because Claude Code moves that folder on
