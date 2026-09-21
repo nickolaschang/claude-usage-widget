@@ -872,15 +872,116 @@ $script:Pump.Add_Tick({
 
 # Windows keeps the taskbar in the same always-on-top band as this window, and the taskbar puts
 # itself back on top whenever it is used. A pill parked on the taskbar would silently disappear
-# behind it. So while the widget sticks out of the work area, keep re-asserting its place.
-# Skipped while the pointer is over the widget (it is visible then, and its tooltip and menu
-# must stay above it).
+# behind it. So while the widget sticks out of its monitor's work area, a small native timer
+# checks every 50 ms whether the taskbar is covering it and takes the top spot back, fast enough
+# that nobody notices. Measured: hidden for about 45 ms, against up to a second with a slow re-check.
+#
+# Why native: a tick is a handful of system calls (microseconds), where a PowerShell script block
+# costs a fraction of a millisecond each time. When the widget is not over the taskbar it idles
+# at one check a second.
+#
+# The check is targeted on purpose: it only ever acts when the window covering us IS the taskbar.
+# Blindly re-asserting at this rate would fight with Start, flyouts, and other always-on-top apps.
+$script:TaskbarGuard = $false
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+namespace ClaudeUsageWidget {
+    public static class TaskbarGuard {
+        [StructLayout(LayoutKind.Sequential)] struct POINT { public int X; public int Y; }
+        [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+        [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
+        [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+        [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder text, int max);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+        [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+        [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+
+        public static int FastMs = 50;        // while parked over the taskbar zone (30 measured no better: timer granularity)
+        public static int SlowMs = 1000;      // everywhere else
+        public static volatile bool Enabled = true;   // follows the "Always on top" menu item
+        public static volatile bool Paused;           // while our own menu is open or a drag is in progress
+        static IntPtr self = IntPtr.Zero;
+        static Timer timer;
+        static long reclaims;
+        public static long Reclaims { get { return Interlocked.Read(ref reclaims); } }
+
+        public static void Start(IntPtr hwnd) {
+            self = hwnd;
+            if (timer == null) timer = new Timer(Tick, null, SlowMs, Timeout.Infinite);
+        }
+
+        public static void Stop() {
+            Timer t = timer;
+            timer = null;
+            if (t != null) t.Dispose();
+        }
+
+        static bool TaskbarAt(int x, int y) {
+            POINT p; p.X = x; p.Y = y;
+            IntPtr top = GetAncestor(WindowFromPoint(p), 2);           // GA_ROOT
+            if (top == IntPtr.Zero || top == self) return false;
+            StringBuilder name = new StringBuilder(64);
+            GetClassName(top, name, 64);
+            string c = name.ToString();
+            return c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd";
+        }
+
+        // One-shot timer, re-armed at the end of each tick, so ticks can never overlap.
+        static void Tick(object state) {
+            int next = SlowMs;
+            try {
+                RECT r;
+                if (Enabled && !Paused && self != IntPtr.Zero && IsWindowVisible(self) && GetWindowRect(self, out r)) {
+                    MONITORINFO info = new MONITORINFO();
+                    info.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+                    if (GetMonitorInfo(MonitorFromWindow(self, 2), ref info)) {      // MONITOR_DEFAULTTONEAREST
+                        RECT w = info.rcWork;
+                        bool outside = r.Left < w.Left || r.Top < w.Top || r.Right > w.Right || r.Bottom > w.Bottom;
+                        if (outside) {
+                            next = FastMs;
+                            // The middle of each edge (2px in) and the centre: the widget may only
+                            // partly overlap the taskbar.
+                            int mx = (r.Left + r.Right) / 2, my = (r.Top + r.Bottom) / 2;
+                            if (TaskbarAt(mx, my) || TaskbarAt(mx, r.Bottom - 2) || TaskbarAt(mx, r.Top + 2)
+                                || TaskbarAt(r.Left + 2, my) || TaskbarAt(r.Right - 2, my)) {
+                                // HWND_TOPMOST with NOSIZE | NOMOVE | NOACTIVATE | ASYNCWINDOWPOS
+                                SetWindowPos(self, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x4000);
+                                Interlocked.Increment(ref reclaims);
+                            }
+                        }
+                    }
+                }
+            } catch { }
+            Timer t = timer;
+            if (t != null) { try { t.Change(next, Timeout.Infinite); } catch (ObjectDisposedException) { } }
+        }
+    }
+}
+'@
+    $script:TaskbarGuard = $true
+} catch {
+    Write-WidgetLog ('taskbar guard unavailable, using the slow fallback: {0}' -f $_.Exception.Message)
+}
+
+function Set-GuardPaused([bool]$Paused) {
+    if ($script:TaskbarGuard) { [ClaudeUsageWidget.TaskbarGuard]::Paused = $Paused }
+}
+
+# Fallback for machines where the native helper cannot be compiled: once a second, and never while
+# the pointer is over the widget, because this blunt version would also jump above our own tooltip.
 $script:TopmostTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:TopmostTimer.Interval = [TimeSpan]::FromSeconds(1)
 $script:TopmostTimer.Add_Tick({
     try {
         $w = $script:Window
-        if (-not $script:Positioned -or -not $script:UI.MiTop.IsChecked) { return }
+        if (-not $script:Positioned -or -not $script:UI.MiTop.IsChecked -or -not $w.IsVisible) { return }
         if ($w.IsMouseOver -or $script:UI.Card.ContextMenu.IsOpen -or $null -ne $script:DragOrigin) { return }
         $area = [System.Windows.SystemParameters]::WorkArea
         $outside = ($w.Top -lt $area.Top) -or ($w.Left -lt $area.Left) -or
@@ -914,6 +1015,7 @@ $script:Window.Add_MouseLeftButtonDown({
             return
         }
         $script:DragOrigin = $e.GetPosition($script:Window)
+        Set-GuardPaused $true                        # no z-order changes in the middle of a click or drag
         [void]$script:Window.CaptureMouse()          # keep receiving moves even if the pointer leaves the tiny pill
     } catch { }
 })
@@ -931,6 +1033,7 @@ $script:Window.Add_MouseMove({
             $script:DragOrigin = $null
             $script:Window.ReleaseMouseCapture()
             $script:Window.DragMove()                # returns when the mouse button is released
+            Set-GuardPaused $false
             Save-WidgetState
         }
     } catch { }
@@ -938,6 +1041,7 @@ $script:Window.Add_MouseMove({
 $script:Window.Add_MouseLeftButtonUp({
     param($s, $e)
     $script:DragOrigin = $null
+    Set-GuardPaused $false
     try { $script:Window.ReleaseMouseCapture() } catch { }
 })
 
@@ -982,15 +1086,18 @@ $script:UI.CloseGlyph.Add_MouseLeftButtonDown({
 
 # The Startup shortcut can be added or removed outside the widget, so re-read it whenever the menu opens.
 $script:UI.Card.ContextMenu.Add_Opened({
+    Set-GuardPaused $true          # our menu is an always-on-top popup too: never jump in front of it
     $script:UI.MiStartup.IsChecked = Test-Path -LiteralPath $script:StartupLink
     $script:UI.MiCompact.IsChecked = $script:Compact
 })
+$script:UI.Card.ContextMenu.Add_Closed({ Set-GuardPaused $false })
 $script:UI.MiCompact.Add_Click({ Set-CompactMode ([bool]$script:UI.MiCompact.IsChecked) })
 
 $script:UI.MiRefresh.Add_Click({ try { Start-Refresh } catch { Write-WidgetLog ("manual refresh: {0}" -f $_.Exception.Message) } })
 $script:UI.MiExit.Add_Click({ $script:Window.Close() })
 $script:UI.MiTop.Add_Click({
     $script:Window.Topmost = [bool]$script:UI.MiTop.IsChecked
+    if ($script:TaskbarGuard) { [ClaudeUsageWidget.TaskbarGuard]::Enabled = [bool]$script:UI.MiTop.IsChecked }
     Save-WidgetState
 })
 $script:UI.MiStartup.Add_Click({
@@ -1049,8 +1156,14 @@ $script:Window.Add_Loaded({
         $script:Positioned = $true      # from here on, size changes re-anchor and state gets saved
 
         $script:UI.MiStartup.IsChecked = Test-Path -LiteralPath $script:StartupLink
+        $script:Hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $script:Window).Handle
         $script:RefreshTimer.Start()
-        $script:TopmostTimer.Start()
+        if ($script:TaskbarGuard) {
+            [ClaudeUsageWidget.TaskbarGuard]::Enabled = [bool]$script:UI.MiTop.IsChecked
+            [ClaudeUsageWidget.TaskbarGuard]::Start($script:Hwnd)
+        } else {
+            $script:TopmostTimer.Start()
+        }
         Start-Refresh
     } catch {
         Write-WidgetLog ("loaded: {0}" -f $_.Exception.Message)
@@ -1062,6 +1175,7 @@ $script:Window.Add_Closing({
     $script:Pump.Stop()
     $script:RefreshTimer.Stop()
     $script:TopmostTimer.Stop()
+    if ($script:TaskbarGuard) { [ClaudeUsageWidget.TaskbarGuard]::Stop() }
     Save-WidgetState
 })
 

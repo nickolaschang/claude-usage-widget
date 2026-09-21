@@ -32,6 +32,57 @@ UI_FONTS = ("Segoe UI", "SF Pro Text", "Helvetica Neue", "Cantarell", "Ubuntu", 
 MONO_FONTS = ("Cascadia Mono", "Consolas", "SF Mono", "Menlo", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
 
 
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    class _MONITORINFO(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                    ("dwFlags", wintypes.DWORD)]
+
+    _user32 = ctypes.WinDLL("user32")
+    _user32.WindowFromPoint.argtypes, _user32.WindowFromPoint.restype = [wintypes.POINT], wintypes.HWND
+    _user32.GetAncestor.argtypes, _user32.GetAncestor.restype = [wintypes.HWND, wintypes.UINT], wintypes.HWND
+    _user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    _user32.MonitorFromWindow.argtypes, _user32.MonitorFromWindow.restype = [wintypes.HWND, wintypes.DWORD], wintypes.HANDLE
+    _user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_MONITORINFO)]
+    _user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                     ctypes.c_int, wintypes.UINT]
+
+    def reclaim_from_taskbar(widget_hwnd):
+        """Windows keeps the taskbar in the same always-on-top band as the widget, and the taskbar
+        puts itself back on top whenever it is used, so a pill parked on it would disappear behind
+        it. If the taskbar is covering the widget, take the top spot back.
+
+        Targeted on purpose: it only ever acts when the window on top IS the taskbar, so it never
+        fights Start, flyouts, or other always-on-top apps. Returns True while the widget sticks
+        out of its monitor's work area, which is the caller's cue to keep checking quickly."""
+        top = _user32.GetAncestor(widget_hwnd, 2)                      # GA_ROOT
+        rect = wintypes.RECT()
+        if not top or not _user32.GetWindowRect(top, ctypes.byref(rect)):
+            return False
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(_MONITORINFO)
+        if not _user32.GetMonitorInfoW(_user32.MonitorFromWindow(top, 2), ctypes.byref(info)):   # nearest monitor
+            return False
+        work = info.rcWork
+        if not (rect.left < work.left or rect.top < work.top or rect.right > work.right or rect.bottom > work.bottom):
+            return False
+        # The middle of each edge (2px in) and the centre: the widget may only partly overlap the taskbar.
+        mid_x, mid_y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
+        name = ctypes.create_unicode_buffer(64)
+        for x, y in ((mid_x, mid_y), (mid_x, rect.bottom - 2), (mid_x, rect.top + 2), (rect.left + 2, mid_y), (rect.right - 2, mid_y)):
+            over = _user32.GetAncestor(_user32.WindowFromPoint(wintypes.POINT(x, y)), 2)
+            if not over or over == top:
+                continue
+            _user32.GetClassNameW(over, name, 64)
+            if name.value in ("Shell_TrayWnd", "Shell_SecondaryTrayWnd"):
+                _user32.SetWindowPos(top, wintypes.HWND(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)   # TOPMOST, no size/move/activate
+                break
+        return True
+
+
 class Tooltip:
     """Shows text_fn() near the pointer after a short hover."""
 
@@ -81,6 +132,7 @@ class WidgetApp:
         self.compact = False
         self._drag_from = None
         self._moved = False
+        self._menu_open = False
         self._results = queue.Queue()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -218,22 +270,18 @@ class WidgetApp:
         self._save_state()
 
     def _keep_on_top(self):
-        """Windows only. The taskbar lives in the same always-on-top band and puts itself back on
-        top whenever it is used, so a pill parked on it would silently disappear behind it.
-        Skipped while the pointer is over the widget, so tooltips and the menu stay above it."""
+        """Windows only: every 30 ms while the widget is parked over the taskbar zone, once a second
+        otherwise. Measured by forcing the taskbar on top and sampling every 10 ms: the pill is
+        hidden for 30 to 46 ms, against up to a second with a slow re-check."""
         if self._stop.is_set():
             return
+        fast = False
         try:
-            root = self.root
-            pointer_x, pointer_y = root.winfo_pointerxy()
-            inside = (root.winfo_x() <= pointer_x <= root.winfo_x() + root.winfo_width()
-                      and root.winfo_y() <= pointer_y <= root.winfo_y() + root.winfo_height())
-            if self.topmost_var.get() and self._drag_from is None and not inside:
-                root.attributes("-topmost", False)      # off then on moves it to the front of the band
-                root.attributes("-topmost", True)
-        except tk.TclError:
+            if self.topmost_var.get() and self._drag_from is None and not self._menu_open:
+                fast = reclaim_from_taskbar(self.root.winfo_id())
+        except Exception:                                    # never let a z-order nicety take the widget down
             pass
-        self.root.after(1000, self._keep_on_top)
+        self.root.after(30 if fast else 1000, self._keep_on_top)
 
     # -- mouse ----------------------------------------------------------------
 
@@ -259,10 +307,12 @@ class WidgetApp:
         self._moved = False
 
     def _popup(self, event):
+        self._menu_open = True                  # the menu is an always-on-top popup too: do not jump in front of it
         try:
             self.menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.menu.grab_release()
+            self._menu_open = False
 
     # -- size, position, state ----------------------------------------------------
 

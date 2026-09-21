@@ -63,6 +63,18 @@ class Window(unittest.TestCase):
         self.assertLessEqual(x + self.root.winfo_width(), screen_width)
         self.assertLessEqual(y + self.root.winfo_height(), screen_height)
 
+    @unittest.skipUnless(os.name == "nt", "the taskbar guard is Windows only")
+    def test_taskbar_guard_only_polls_fast_outside_the_work_area(self):
+        import claude_usage_widget as widget
+        now = time.time()
+        self.app.render({"h5": bucket(1.0), "today": bucket(2.0), "d7": bucket(3.0)}, None, last_event=now, now=now)
+        self.root.geometry("+200+200")                                   # comfortably inside the work area
+        self.root.update()
+        self.assertFalse(widget.reclaim_from_taskbar(self.root.winfo_id()))
+        self.root.geometry("+200+%d" % (self.root.winfo_screenheight() - 10))     # hanging off the bottom edge
+        self.root.update()
+        self.assertTrue(widget.reclaim_from_taskbar(self.root.winfo_id()))
+
     def test_render_limits_compact_and_state(self):
         now = time.time()
         summary = {"h5": bucket(77.26), "today": bucket(120.89), "d7": bucket(462.18)}
