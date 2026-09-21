@@ -32,6 +32,19 @@ jobs:
       - name: Engine, feed and cross-edition tests
         run: python -m unittest discover -s python/tests -v
 
+      # The window code differs per platform (borderless style, stay-on-top), so open a real one.
+      - name: Window smoke test (Linux, under a virtual display)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb tk
+          CUW_GUI_TESTS=1 xvfb-run -a python -m unittest python/tests/test_widget.py -v
+
+      - name: Window smoke test (macOS and Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: CUW_GUI_TESTS=1 python -m unittest python/tests/test_widget.py -v
+
       - name: Command line smoke test on an empty transcripts folder
         shell: bash
         run: |
