@@ -114,6 +114,8 @@ class WidgetApp:
         if start_worker:
             threading.Thread(target=self._worker, name="usage-scan", daemon=True).start()
             root.after(200, self._poll)
+            if os.name == "nt":
+                root.after(1000, self._keep_on_top)
 
     # -- window ---------------------------------------------------------------
 
@@ -215,6 +217,24 @@ class WidgetApp:
             pass
         self._save_state()
 
+    def _keep_on_top(self):
+        """Windows only. The taskbar lives in the same always-on-top band and puts itself back on
+        top whenever it is used, so a pill parked on it would silently disappear behind it.
+        Skipped while the pointer is over the widget, so tooltips and the menu stay above it."""
+        if self._stop.is_set():
+            return
+        try:
+            root = self.root
+            pointer_x, pointer_y = root.winfo_pointerxy()
+            inside = (root.winfo_x() <= pointer_x <= root.winfo_x() + root.winfo_width()
+                      and root.winfo_y() <= pointer_y <= root.winfo_y() + root.winfo_height())
+            if self.topmost_var.get() and self._drag_from is None and not inside:
+                root.attributes("-topmost", False)      # off then on moves it to the front of the band
+                root.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        self.root.after(1000, self._keep_on_top)
+
     # -- mouse ----------------------------------------------------------------
 
     def _from_menu(self, event):
@@ -292,6 +312,11 @@ class WidgetApp:
             x += width - new_width
         if y + height / 2 > screen_height / 2:
             y += height - new_height
+        # A card dragged partly past the screen edge would otherwise shrink to a pill that is
+        # entirely off-screen (its fixed edge was the one outside). Always end up fully visible.
+        origin_x, origin_y, total_width, total_height = self._screen()
+        x = max(origin_x, min(x, origin_x + total_width - new_width))
+        y = max(origin_y, min(y, origin_y + total_height - new_height))
         self.root.geometry("+%d+%d" % (x, y))
 
     def _load_state(self):

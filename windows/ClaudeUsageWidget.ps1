@@ -870,6 +870,27 @@ $script:Pump.Add_Tick({
     }
 })
 
+# Windows keeps the taskbar in the same always-on-top band as this window, and the taskbar puts
+# itself back on top whenever it is used. A pill parked on the taskbar would silently disappear
+# behind it. So while the widget sticks out of the work area, keep re-asserting its place.
+# Skipped while the pointer is over the widget (it is visible then, and its tooltip and menu
+# must stay above it).
+$script:TopmostTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:TopmostTimer.Interval = [TimeSpan]::FromSeconds(1)
+$script:TopmostTimer.Add_Tick({
+    try {
+        $w = $script:Window
+        if (-not $script:Positioned -or -not $script:UI.MiTop.IsChecked) { return }
+        if ($w.IsMouseOver -or $script:UI.Card.ContextMenu.IsOpen -or $null -ne $script:DragOrigin) { return }
+        $area = [System.Windows.SystemParameters]::WorkArea
+        $outside = ($w.Top -lt $area.Top) -or ($w.Left -lt $area.Left) -or
+                   (($w.Top + $w.ActualHeight) -gt $area.Bottom) -or (($w.Left + $w.ActualWidth) -gt $area.Right)
+        if (-not $outside) { return }
+        $w.Topmost = $false      # off then on moves the window to the front of the always-on-top band
+        $w.Topmost = $true
+    } catch { }
+})
+
 $script:RefreshTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:RefreshTimer.Interval = [TimeSpan]::FromSeconds($script:RefreshSeconds)
 $script:RefreshTimer.Add_Tick({
@@ -932,8 +953,23 @@ $script:Window.Add_SizeChanged({
         if ($prev.Width -le 0 -or $prev.Height -le 0) { return }
         $w = $script:Window
         $area = [System.Windows.SystemParameters]::WorkArea
-        if (($w.Left + $prev.Width / 2) -gt ($area.Left + $area.Width / 2))  { $w.Left += ($prev.Width - $new.Width) }
-        if (($w.Top + $prev.Height / 2) -gt ($area.Top + $area.Height / 2))  { $w.Top  += ($prev.Height - $new.Height) }
+        $left = $w.Left
+        $top  = $w.Top
+        if (($left + $prev.Width / 2) -gt ($area.Left + $area.Width / 2))  { $left += ($prev.Width - $new.Width) }
+        if (($top + $prev.Height / 2) -gt ($area.Top + $area.Height / 2))  { $top  += ($prev.Height - $new.Height) }
+
+        # A card dragged partly past the screen edge would otherwise shrink to a pill that is
+        # entirely off-screen (its fixed edge was the one outside). Always end up fully visible.
+        # The whole screen, not the work area, so the pill may still sit on the taskbar.
+        $vsLeft = [System.Windows.SystemParameters]::VirtualScreenLeft
+        $vsTop  = [System.Windows.SystemParameters]::VirtualScreenTop
+        $maxLeft = $vsLeft + [System.Windows.SystemParameters]::VirtualScreenWidth - $new.Width
+        $maxTop  = $vsTop + [System.Windows.SystemParameters]::VirtualScreenHeight - $new.Height
+        $left = [Math]::Max($vsLeft, [Math]::Min($left, $maxLeft))
+        $top  = [Math]::Max($vsTop, [Math]::Min($top, $maxTop))
+
+        if ($left -ne $w.Left) { $w.Left = $left }
+        if ($top -ne $w.Top)   { $w.Top = $top }
         Save-WidgetState
     } catch { }
 })
@@ -1014,6 +1050,7 @@ $script:Window.Add_Loaded({
 
         $script:UI.MiStartup.IsChecked = Test-Path -LiteralPath $script:StartupLink
         $script:RefreshTimer.Start()
+        $script:TopmostTimer.Start()
         Start-Refresh
     } catch {
         Write-WidgetLog ("loaded: {0}" -f $_.Exception.Message)
@@ -1024,6 +1061,7 @@ $script:Window.Add_Loaded({
 $script:Window.Add_Closing({
     $script:Pump.Stop()
     $script:RefreshTimer.Stop()
+    $script:TopmostTimer.Stop()
     Save-WidgetState
 })
 

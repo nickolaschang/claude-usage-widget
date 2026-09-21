@@ -45,6 +45,24 @@ class Window(unittest.TestCase):
             found += self.texts(child)
         return found
 
+    def test_shrinking_a_card_that_hangs_off_the_screen_keeps_the_pill_visible(self):
+        # Found by a user: drag the card so its bottom edge is past the screen, double-click, and
+        # the pill (anchored to that same bottom edge) ended up entirely off-screen.
+        now = time.time()
+        summary = {"h5": bucket(1.0), "today": bucket(2.0), "d7": bucket(3.0)}
+        self.app.render(summary, None, last_event=now, now=now)
+        screen_width, screen_height = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.root.geometry("+%d+%d" % (screen_width - 60, screen_height - 60))     # mostly past the corner
+        self.root.update()
+
+        self.app.set_compact(True)
+        self.root.update()
+        x, y = self.root.winfo_x(), self.root.winfo_y()
+        self.assertGreaterEqual(x, 0)
+        self.assertGreaterEqual(y, 0)
+        self.assertLessEqual(x + self.root.winfo_width(), screen_width)
+        self.assertLessEqual(y + self.root.winfo_height(), screen_height)
+
     def test_render_limits_compact_and_state(self):
         now = time.time()
         summary = {"h5": bucket(77.26), "today": bucket(120.89), "d7": bucket(462.18)}
