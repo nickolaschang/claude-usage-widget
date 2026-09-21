@@ -474,3 +474,530 @@ if ($SelfTest) {
     return
 }
 
+# ---------------------------------------------------------------------------
+# Window
+# ---------------------------------------------------------------------------
+
+# WPF needs a single-threaded apartment. Relaunch with -STA if the host started us otherwise.
+if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Threading.ApartmentState]::STA) {
+    $exe = (Get-Process -Id $PID).Path
+    Start-Process -FilePath $exe -WindowStyle Hidden -ArgumentList @(
+        '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath))
+    return
+}
+
+$createdNew = $false
+$script:Mutex = New-Object System.Threading.Mutex($true, 'Local\ClaudeUsageWidget', [ref]$createdNew)
+if (-not $createdNew) { return }   # already running
+
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+
+$xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Claude Usage" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize" SizeToContent="WidthAndHeight"
+        WindowStartupLocation="Manual" UseLayoutRounding="True" SnapsToDevicePixels="True"
+        FontFamily="Segoe UI" FontSize="12" Foreground="#F3F1EA">
+  <Window.Resources>
+    <Style x:Key="Label" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#B8B5AD"/>
+      <Setter Property="Margin" Value="0,2,14,2"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="Value" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Cascadia Mono, Consolas"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="HorizontalAlignment" Value="Right"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Margin" Value="0,2,0,2"/>
+    </Style>
+    <Style x:Key="Dim" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Cascadia Mono, Consolas"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="Foreground" Value="#8A877F"/>
+      <Setter Property="HorizontalAlignment" Value="Right"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Margin" Value="12,2,0,2"/>
+    </Style>
+    <Style x:Key="Caption" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="10"/>
+      <Setter Property="Foreground" Value="#6F6C66"/>
+      <Setter Property="HorizontalAlignment" Value="Right"/>
+      <Setter Property="Margin" Value="12,0,0,1"/>
+    </Style>
+  </Window.Resources>
+
+  <Border x:Name="Card" CornerRadius="10" Background="#F21C1B1A" BorderBrush="#2EFFFFFF" BorderThickness="1"
+          Padding="13,9,13,9" MinWidth="226">
+    <Border.ContextMenu>
+      <ContextMenu>
+        <MenuItem x:Name="MiRefresh" Header="Refresh now"/>
+        <MenuItem x:Name="MiCompact" Header="Compact (double-click)" IsCheckable="True"/>
+        <MenuItem x:Name="MiTop" Header="Always on top" IsCheckable="True" IsChecked="True"/>
+        <MenuItem x:Name="MiStartup" Header="Start with Windows" IsCheckable="True"/>
+        <Separator/>
+        <MenuItem x:Name="MiExit" Header="Exit"/>
+      </ContextMenu>
+    </Border.ContextMenu>
+    <!-- Two views share the card; exactly one is visible. Double-click switches between them. -->
+    <Grid>
+    <StackPanel x:Name="FullView">
+
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <Ellipse x:Name="TitleDot" Width="7" Height="7" Fill="#5A5853" VerticalAlignment="Center" Margin="0,1,7,0"/>
+        <TextBlock Grid.Column="1" Text="CLAUDE USAGE" FontSize="10" FontWeight="SemiBold" Foreground="#9C9A92"
+                   VerticalAlignment="Center" ToolTip="Double-click to shrink"/>
+        <TextBlock x:Name="CloseGlyph" Grid.Column="2" Text="&#215;" FontSize="15" Foreground="#6F6C66"
+                   Padding="6,0,0,0" Margin="0,-4,-2,-2" Cursor="Hand" ToolTip="Close"/>
+      </Grid>
+
+      <Grid Margin="0,5,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto" MinWidth="70"/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Grid.Column="1" Text="est. cost" Style="{StaticResource Caption}"/>
+        <TextBlock Grid.Row="0" Grid.Column="2" Text="tokens" Style="{StaticResource Caption}"/>
+
+        <TextBlock x:Name="Lbl5h"  Grid.Row="1" Grid.Column="0" Text="Last 5h" Style="{StaticResource Label}"/>
+        <TextBlock x:Name="Cost5h" Grid.Row="1" Grid.Column="1" Text="..." Style="{StaticResource Value}"/>
+        <TextBlock x:Name="Tok5h"  Grid.Row="1" Grid.Column="2" Text="" Style="{StaticResource Dim}"/>
+
+        <TextBlock x:Name="LblToday"  Grid.Row="2" Grid.Column="0" Text="Today" Style="{StaticResource Label}"/>
+        <TextBlock x:Name="CostToday" Grid.Row="2" Grid.Column="1" Text="..." Style="{StaticResource Value}"/>
+        <TextBlock x:Name="TokToday"  Grid.Row="2" Grid.Column="2" Text="" Style="{StaticResource Dim}"/>
+
+        <TextBlock x:Name="Lbl7d"  Grid.Row="3" Grid.Column="0" Text="7 days" Style="{StaticResource Label}"/>
+        <TextBlock x:Name="Cost7d" Grid.Row="3" Grid.Column="1" Text="..." Style="{StaticResource Value}"/>
+        <TextBlock x:Name="Tok7d"  Grid.Row="3" Grid.Column="2" Text="" Style="{StaticResource Dim}"/>
+      </Grid>
+
+      <!-- One row per rate-limit window, built in code from whatever the feed reports. -->
+      <StackPanel x:Name="LimitsPanel" Visibility="Collapsed" Margin="0,7,0,0">
+        <StackPanel x:Name="LimitRows"/>
+        <TextBlock x:Name="LimitsAsOf" FontSize="10" Foreground="#6F6C66" Visibility="Collapsed"/>
+      </StackPanel>
+
+      <TextBlock x:Name="ModelSplit" FontSize="11" Foreground="#B8B5AD" Margin="0,7,0,0" Text=""/>
+      <TextBlock x:Name="Footer" FontSize="10" Foreground="#6F6C66" Margin="0,3,0,0" Text="starting"/>
+    </StackPanel>
+
+    <StackPanel x:Name="CompactView" Orientation="Horizontal" Visibility="Collapsed">
+      <Ellipse x:Name="CompactDot" Width="7" Height="7" Fill="#5A5853" VerticalAlignment="Center" Margin="0,1,7,0"/>
+      <TextBlock x:Name="CompactText" FontFamily="Cascadia Mono, Consolas" FontSize="12" Foreground="#F3F1EA"
+                 VerticalAlignment="Center" Text="..."/>
+    </StackPanel>
+    </Grid>
+  </Border>
+</Window>
+'@
+
+try {
+    $script:Window = [System.Windows.Markup.XamlReader]::Parse($xaml)
+} catch {
+    Write-WidgetLog ("XAML failed to load: {0}" -f $_.Exception.Message)
+    throw
+}
+
+$script:UI = @{}
+foreach ($name in 'Card', 'TitleDot', 'CloseGlyph', 'Lbl5h', 'Cost5h', 'Tok5h', 'LblToday', 'CostToday', 'TokToday',
+                  'Lbl7d', 'Cost7d', 'Tok7d', 'LimitsPanel', 'LimitRows', 'LimitsAsOf',
+                  'ModelSplit', 'Footer', 'FullView', 'CompactView', 'CompactDot', 'CompactText',
+                  'MiRefresh', 'MiCompact', 'MiTop', 'MiStartup', 'MiExit') {
+    $script:UI[$name] = $script:Window.FindName($name)
+}
+
+$brushes = New-Object System.Windows.Media.BrushConverter
+$script:BrushAccent = $brushes.ConvertFromString('#D97757')
+$script:BrushHot    = $brushes.ConvertFromString('#E5484D')
+$script:BrushIdle   = $brushes.ConvertFromString('#5A5853')
+$script:BrushTrack  = $brushes.ConvertFromString('#1FFFFFFF')
+$script:BrushText   = $brushes.ConvertFromString('#F3F1EA')
+$script:StyleLabel  = $script:Window.FindResource('Label')
+$script:StyleDim    = $script:Window.FindResource('Dim')
+$script:Dot         = [string][char]0x00B7
+
+$script:Compact     = $false          # compact pill vs full card; toggled by double-click
+$script:Positioned  = $false          # true once the window has been placed; gates anchoring and state saves
+
+$script:StartupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude Usage Widget.lnk'
+$script:LauncherVbs = Join-Path $PSScriptRoot 'Start-ClaudeUsageWidget.vbs'
+
+function Add-LimitRow($limit) {
+    # Label on the left, "NN% left . resets 3d 4h" on the right, and a bar that drains as the
+    # allowance is used (full = plenty left), turning red for the last 15%.
+    $grid = New-Object System.Windows.Controls.Grid
+    $colLabel = New-Object System.Windows.Controls.ColumnDefinition
+    $colValue = New-Object System.Windows.Controls.ColumnDefinition
+    $colValue.Width = [System.Windows.GridLength]::Auto
+    [void]$grid.ColumnDefinitions.Add($colLabel)
+    [void]$grid.ColumnDefinitions.Add($colValue)
+
+    $label = New-Object System.Windows.Controls.TextBlock
+    $label.Style = $script:StyleLabel
+    $label.Text = $limit.Label
+
+    $text = '{0:0}% left' -f $limit.Left
+    $tip = '{0:0}% used' -f $limit.Used
+    if ($null -ne $limit.Resets) {
+        $text = '{0} {1} resets {2}' -f $text, $script:Dot, (Format-Span ($limit.Resets - [datetime]::UtcNow))
+        $tip = '{0}, resets {1:ddd d MMM HH:mm}' -f $tip, $limit.Resets.ToLocalTime()
+    }
+    $value = New-Object System.Windows.Controls.TextBlock
+    $value.Style = $script:StyleDim
+    $value.Text = $text
+    [System.Windows.Controls.Grid]::SetColumn($value, 1)
+    [void]$grid.Children.Add($label)
+    [void]$grid.Children.Add($value)
+    $grid.ToolTip = $tip
+
+    $bar = New-Object System.Windows.Controls.ProgressBar
+    $bar.Height = 4
+    $bar.Minimum = 0
+    $bar.Maximum = 100
+    $bar.Value = $limit.Left
+    $bar.Background = $script:BrushTrack
+    $bar.Foreground = if ($limit.Left -le 15) { $script:BrushHot } else { $script:BrushAccent }
+    $bar.BorderThickness = [System.Windows.Thickness]::new(0)
+    $bar.Margin = [System.Windows.Thickness]::new(0, 1, 0, 5)
+    $bar.ToolTip = $tip
+
+    [void]$script:UI.LimitRows.Children.Add($grid)
+    [void]$script:UI.LimitRows.Children.Add($bar)
+}
+
+function Update-View {
+    $ui = $script:UI
+    $s = Get-UsageSummary
+
+    $rows = @(
+        @{ Bucket = $s.H5;    Label = $ui.Lbl5h;    Cost = $ui.Cost5h;    Tok = $ui.Tok5h }
+        @{ Bucket = $s.Today; Label = $ui.LblToday; Cost = $ui.CostToday; Tok = $ui.TokToday }
+        @{ Bucket = $s.D7;    Label = $ui.Lbl7d;    Cost = $ui.Cost7d;    Tok = $ui.Tok7d }
+    )
+    foreach ($r in $rows) {
+        $r.Cost.Text = Format-Cost $r.Bucket.Cost
+        $r.Tok.Text  = Format-Tokens $r.Bucket.Tokens
+        $tip = Get-BucketTip $r.Bucket
+        $r.Label.ToolTip = $tip; $r.Cost.ToolTip = $tip; $r.Tok.ToolTip = $tip
+    }
+
+    $split = Get-ModelSplit $s.Today
+    $ui.ModelSplit.Text = if ($split) { $split } else { 'no usage yet today' }
+
+    $rl = Read-RateLimits
+    $ui.LimitRows.Children.Clear()
+    if ($null -eq $rl) {
+        $ui.LimitsPanel.Visibility = [System.Windows.Visibility]::Collapsed
+    } else {
+        $ui.LimitsPanel.Visibility = [System.Windows.Visibility]::Visible
+        foreach ($limit in $rl.Windows) { Add-LimitRow $limit }
+
+        # The feed only moves while a Claude Code session is open, so say so once it gets old.
+        $readAt = $rl.Updated.ToLocalTime()
+        if (([datetime]::UtcNow - $rl.Updated).TotalMinutes -ge $script:FeedStaleMinutes) {
+            $format = if ($readAt.Date -eq [datetime]::Today) { 'HH:mm' } else { 'ddd HH:mm' }
+            $ui.LimitsAsOf.Text = 'limits as of {0}' -f $readAt.ToString($format)
+            $ui.LimitsAsOf.Visibility = [System.Windows.Visibility]::Visible
+        } else {
+            $ui.LimitsAsOf.Visibility = [System.Windows.Visibility]::Collapsed
+        }
+    }
+
+    # The dot lights up while Claude has answered something in the last two minutes.
+    $live = ([datetime]::UtcNow - $script:LastEventUtc).TotalMinutes -le 2
+    $ui.TitleDot.Fill = if ($live) { $script:BrushAccent } else { $script:BrushIdle }
+
+    # Compact pill: the limit remainders when the feed is there, otherwise the cost headline.
+    $ui.CompactDot.Fill = $ui.TitleDot.Fill
+    $sep = ' {0} ' -f $script:Dot
+    $tipLines = @()
+    if ($null -ne $rl) {
+        $short = @{ five_hour = '5h'; seven_day = 'wk' }
+        $shown = @($rl.Windows | Where-Object { $short.ContainsKey($_.Name) })
+        if ($shown.Count -eq 0) { $shown = @($rl.Windows | Select-Object -First 2) }
+        $bits = foreach ($limit in $shown) {
+            $tag = if ($short.ContainsKey($limit.Name)) { $short[$limit.Name] } else { $limit.Label }
+            '{0} {1:0}%' -f $tag, $limit.Left
+        }
+        $ui.CompactText.Text = (@($bits) -join $sep) + ' left'
+        $lowest = 100.0
+        foreach ($limit in $rl.Windows) {
+            if ($limit.Left -lt $lowest) { $lowest = $limit.Left }
+            $line = '{0}: {1:0}% left' -f $limit.Label, $limit.Left
+            if ($null -ne $limit.Resets) { $line = '{0}, resets {1}' -f $line, (Format-Span ($limit.Resets - [datetime]::UtcNow)) }
+            $tipLines += $line
+        }
+        $ui.CompactText.Foreground = if ($lowest -le 15) { $script:BrushHot } else { $script:BrushText }
+    } else {
+        $ui.CompactText.Text = '5h {0}{1}today {2}' -f (Format-Cost $s.H5.Cost), $sep, (Format-Cost $s.Today.Cost)
+        $ui.CompactText.Foreground = $script:BrushText
+    }
+    $tipLines += 'Last 5h {0}   Today {1}   7 days {2}' -f (Format-Cost $s.H5.Cost), (Format-Cost $s.Today.Cost), (Format-Cost $s.D7.Cost)
+    $tipLines += 'Double-click to expand'
+    $ui.CompactView.ToolTip = $tipLines -join "`n"
+
+    if ($script:Queue.Count -gt 0) {
+        $ui.Footer.Text = 'scanning {0} of {1} files' -f ($script:ScanTotal - $script:Queue.Count + 1), $script:ScanTotal
+    } else {
+        $ui.Footer.Text = 'updated {0:HH:mm:ss}' -f (Get-Date)
+    }
+}
+
+function Start-Refresh {
+    Find-ChangedFiles
+    if ($script:Queue.Count -gt 0) { $script:Pump.Start() }
+    Update-View      # time windows slide even when no new data arrived
+}
+
+function Save-WidgetState {
+    # Right and Bottom are saved as well because the widget changes size (compact mode, limit rows
+    # arriving) and keeps its nearest screen edges fixed. Restoring from the matching edge means
+    # it reopens exactly where it was, whatever size it starts at.
+    if (-not $script:Positioned) { return }
+    try {
+        $w = $script:Window
+        $state = @{
+            Left = $w.Left; Top = $w.Top; Right = $w.Left + $w.ActualWidth; Bottom = $w.Top + $w.ActualHeight
+            Topmost = $w.Topmost; Compact = $script:Compact
+        }
+        Set-Content -LiteralPath $script:StatePath -Value ($state | ConvertTo-Json) -Encoding UTF8
+    } catch { }
+}
+
+function Set-CompactMode([bool]$On) {
+    $script:Compact = $On
+    $ui = $script:UI
+    if ($On) {
+        $ui.FullView.Visibility = [System.Windows.Visibility]::Collapsed
+        $ui.CompactView.Visibility = [System.Windows.Visibility]::Visible
+        $ui.Card.MinWidth = 0
+        $ui.Card.Padding = [System.Windows.Thickness]::new(10, 5, 11, 6)
+    } else {
+        $ui.CompactView.Visibility = [System.Windows.Visibility]::Collapsed
+        $ui.FullView.Visibility = [System.Windows.Visibility]::Visible
+        $ui.Card.MinWidth = 226
+        $ui.Card.Padding = [System.Windows.Thickness]::new(13, 9, 13, 9)
+    }
+    $ui.MiCompact.IsChecked = $On
+}
+
+function Set-StartupShortcut([bool]$Enable) {
+    if ($Enable) {
+        $shell = New-Object -ComObject WScript.Shell
+        $link = $shell.CreateShortcut($script:StartupLink)
+        $link.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
+        $link.Arguments = '"{0}"' -f $script:LauncherVbs
+        $link.WorkingDirectory = $PSScriptRoot
+        $link.Description = 'Claude usage widget'
+        $link.Save()
+    } elseif (Test-Path -LiteralPath $script:StartupLink) {
+        Remove-Item -LiteralPath $script:StartupLink -Force
+    }
+}
+
+# The pump drains the scan queue in short slices so the window stays responsive
+# while a big backlog (first launch) is being read.
+$script:Pump = New-Object System.Windows.Threading.DispatcherTimer
+$script:Pump.Interval = [TimeSpan]::FromMilliseconds(15)
+$script:LastPartialPaint = [datetime]::MinValue
+$script:Pump.Add_Tick({
+    try {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $more = $true
+        while ($more -and $sw.ElapsedMilliseconds -lt 100) { $more = Invoke-ScanStep }
+        if (-not $more) {
+            $script:Pump.Stop()
+            Update-View
+        } elseif (([datetime]::UtcNow - $script:LastPartialPaint).TotalMilliseconds -ge 750) {
+            $script:LastPartialPaint = [datetime]::UtcNow
+            Update-View
+        }
+    } catch {
+        $script:Pump.Stop()
+        Write-WidgetLog ("pump: {0}" -f $_.Exception.Message)
+        $script:UI.Footer.Text = 'scan error, see widget.log'
+    }
+})
+
+$script:RefreshTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:RefreshTimer.Interval = [TimeSpan]::FromSeconds($script:RefreshSeconds)
+$script:RefreshTimer.Add_Tick({
+    try { Start-Refresh }
+    catch {
+        Write-WidgetLog ("refresh: {0}" -f $_.Exception.Message)
+        $script:UI.Footer.Text = 'refresh error, see widget.log'
+    }
+})
+
+# Click handling: a double-click toggles compact mode, a press-and-move drags the window.
+# DragMove runs its own modal loop, so it only starts once the pointer has really moved with the
+# button held. Calling it on every mouse-down made double-clicks unreliable while the UI was busy.
+$script:DragOrigin = $null
+$script:Window.Add_MouseLeftButtonDown({
+    param($s, $e)
+    try {
+        if ($e.ClickCount -ge 2) {
+            $script:DragOrigin = $null
+            Set-CompactMode (-not $script:Compact)   # the resize lands in SizeChanged, which re-anchors and saves
+            return
+        }
+        $script:DragOrigin = $e.GetPosition($script:Window)
+        [void]$script:Window.CaptureMouse()          # keep receiving moves even if the pointer leaves the tiny pill
+    } catch { }
+})
+$script:Window.Add_MouseMove({
+    param($s, $e)
+    try {
+        if ($null -eq $script:DragOrigin) { return }
+        if ($e.LeftButton -ne [System.Windows.Input.MouseButtonState]::Pressed) {
+            $script:DragOrigin = $null
+            $script:Window.ReleaseMouseCapture()
+            return
+        }
+        $p = $e.GetPosition($script:Window)
+        if ([Math]::Abs($p.X - $script:DragOrigin.X) -ge 3 -or [Math]::Abs($p.Y - $script:DragOrigin.Y) -ge 3) {
+            $script:DragOrigin = $null
+            $script:Window.ReleaseMouseCapture()
+            $script:Window.DragMove()                # returns when the mouse button is released
+            Save-WidgetState
+        }
+    } catch { }
+})
+$script:Window.Add_MouseLeftButtonUp({
+    param($s, $e)
+    $script:DragOrigin = $null
+    try { $script:Window.ReleaseMouseCapture() } catch { }
+})
+
+# The window sizes itself to its content, and WPF grows or shrinks it from the top-left corner.
+# For a widget parked near the right or bottom of the screen that looks like drifting, so keep
+# whichever edges are nearest the screen edge fixed instead.
+$script:Window.Add_SizeChanged({
+    param($s, $e)
+    try {
+        if (-not $script:Positioned) { return }
+        $prev = $e.PreviousSize
+        $new = $e.NewSize
+        if ($prev.Width -le 0 -or $prev.Height -le 0) { return }
+        $w = $script:Window
+        $area = [System.Windows.SystemParameters]::WorkArea
+        if (($w.Left + $prev.Width / 2) -gt ($area.Left + $area.Width / 2))  { $w.Left += ($prev.Width - $new.Width) }
+        if (($w.Top + $prev.Height / 2) -gt ($area.Top + $area.Height / 2))  { $w.Top  += ($prev.Height - $new.Height) }
+        Save-WidgetState
+    } catch { }
+})
+
+$script:UI.CloseGlyph.Add_MouseLeftButtonDown({
+    param($s, $e)
+    $e.Handled = $true                 # keep the window-level drag handler out of it
+    $script:Window.Close()
+})
+
+# The Startup shortcut can be added or removed outside the widget, so re-read it whenever the menu opens.
+$script:UI.Card.ContextMenu.Add_Opened({
+    $script:UI.MiStartup.IsChecked = Test-Path -LiteralPath $script:StartupLink
+    $script:UI.MiCompact.IsChecked = $script:Compact
+})
+$script:UI.MiCompact.Add_Click({ Set-CompactMode ([bool]$script:UI.MiCompact.IsChecked) })
+
+$script:UI.MiRefresh.Add_Click({ try { Start-Refresh } catch { Write-WidgetLog ("manual refresh: {0}" -f $_.Exception.Message) } })
+$script:UI.MiExit.Add_Click({ $script:Window.Close() })
+$script:UI.MiTop.Add_Click({
+    $script:Window.Topmost = [bool]$script:UI.MiTop.IsChecked
+    Save-WidgetState
+})
+$script:UI.MiStartup.Add_Click({
+    try { Set-StartupShortcut ([bool]$script:UI.MiStartup.IsChecked) }
+    catch {
+        Write-WidgetLog ("startup shortcut: {0}" -f $_.Exception.Message)
+        $script:UI.MiStartup.IsChecked = Test-Path -LiteralPath $script:StartupLink
+    }
+})
+
+# Read the saved state before the window shows, so a widget that was left compact starts compact
+# and its first layout already has the right size.
+$script:SavedState = $null
+if (Test-Path -LiteralPath $script:StatePath) {
+    try { $script:SavedState = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $script:StatePath -Raw) } catch { }
+}
+if ($null -ne $script:SavedState -and $script:SavedState.Compact -eq $true) { Set-CompactMode $true }
+
+$script:Window.Add_Loaded({
+    try {
+        $w = $script:Window
+        $area = [System.Windows.SystemParameters]::WorkArea
+        $left = $area.Right - $w.ActualWidth - 16
+        $top  = $area.Bottom - $w.ActualHeight - 16
+
+        $state = $script:SavedState
+        if ($null -ne $state -and $null -ne $state.Left -and $null -ne $state.Top) {
+            try {
+                $savedLeft = [double]$state.Left
+                $savedTop  = [double]$state.Top
+                $savedRight  = if ($null -ne $state.Right)  { [double]$state.Right }  else { $savedLeft + $w.ActualWidth }
+                $savedBottom = if ($null -ne $state.Bottom) { [double]$state.Bottom } else { $savedTop + $w.ActualHeight }
+
+                # Same rule as SizeChanged: a widget on the right or bottom half hangs off that edge.
+                $candLeft = $savedLeft
+                $candTop  = $savedTop
+                if ((($savedLeft + $savedRight) / 2) -gt ($area.Left + $area.Width / 2))  { $candLeft = $savedRight - $w.ActualWidth }
+                if ((($savedTop + $savedBottom) / 2) -gt ($area.Top + $area.Height / 2)) { $candTop  = $savedBottom - $w.ActualHeight }
+
+                $vsLeft = [System.Windows.SystemParameters]::VirtualScreenLeft
+                $vsTop  = [System.Windows.SystemParameters]::VirtualScreenTop
+                $vsRight  = $vsLeft + [System.Windows.SystemParameters]::VirtualScreenWidth
+                $vsBottom = $vsTop + [System.Windows.SystemParameters]::VirtualScreenHeight
+                # Only restore a position that is still on a connected screen.
+                $onScreen = ($candLeft -ge $vsLeft) -and ($candTop -ge $vsTop) -and
+                            (($candLeft + 60) -le $vsRight) -and (($candTop + 20) -le $vsBottom)
+                if ($onScreen) { $left = $candLeft; $top = $candTop }
+                if ($null -ne $state.Topmost) {
+                    $w.Topmost = [bool]$state.Topmost
+                    $script:UI.MiTop.IsChecked = [bool]$state.Topmost
+                }
+            } catch { }
+        }
+        $w.Left = $left
+        $w.Top  = $top
+        $script:Positioned = $true      # from here on, size changes re-anchor and state gets saved
+
+        $script:UI.MiStartup.IsChecked = Test-Path -LiteralPath $script:StartupLink
+        $script:RefreshTimer.Start()
+        Start-Refresh
+    } catch {
+        Write-WidgetLog ("loaded: {0}" -f $_.Exception.Message)
+        $script:UI.Footer.Text = 'startup error, see widget.log'
+    }
+})
+
+$script:Window.Add_Closing({
+    $script:Pump.Stop()
+    $script:RefreshTimer.Stop()
+    Save-WidgetState
+})
+
+try {
+    [void]$script:Window.ShowDialog()
+} catch {
+    Write-WidgetLog ("fatal: {0}" -f $_.Exception.Message)
+    throw
+} finally {
+    try { $script:Mutex.ReleaseMutex() } catch { }
+    $script:Mutex.Dispose()
+}
