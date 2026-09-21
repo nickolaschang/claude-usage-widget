@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.13"]
+        include:
+          # 3.9 is what ships with the macOS developer tools, so it is the floor we promise.
+          - os: ubuntu-latest
+            python: "3.9"
+          - os: windows-latest
+            python: "3.9"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Engine, feed and cross-edition tests
+        run: python -m unittest discover -s python/tests -v
+
+      - name: Command line smoke test on an empty transcripts folder
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/projects" "$RUNNER_TEMP/state"
+          export CLAUDE_USAGE_WIDGET_STATE_DIR="$RUNNER_TEMP/state"
+          for format in summary oneline xbar waybar json; do
+            echo "--- $format"
+            python python/claude_usage.py --projects-root "$RUNNER_TEMP/projects" --format "$format"
+          done
