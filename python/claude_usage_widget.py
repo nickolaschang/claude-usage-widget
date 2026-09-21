@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Floating Claude usage widget, portable edition (Tk).
+"""Floating usage widget for Claude Code, portable edition (Tk).
 
 A small always-on-top card showing Claude Code cost, tokens, and how much of each rate limit is
 left. Drag to move, double-click to shrink to a one-line pill, right-click for the menu.
@@ -355,7 +355,7 @@ class WidgetApp:
 
     def _style_window(self):
         root = self.root
-        root.title("Claude Usage")
+        root.title("Usage Widget")
         root.configure(bg=BORDER)
         root.resizable(False, False)
         if not self.decorated:
@@ -388,7 +388,7 @@ class WidgetApp:
         header.pack(fill="x")
         self.dot = self._dot(header)
         self.dot.pack(side="left", padx=(0, 6))
-        title = tk.Label(header, text="CLAUDE USAGE", bg=CARD, fg=TITLE, font=self.f_title)
+        title = tk.Label(header, text="CLAUDE CODE USAGE", bg=CARD, fg=TITLE, font=self.f_title)
         title.pack(side="left")
         Tooltip(title, lambda: "Double-click to shrink", self.f_small)
         close = tk.Label(header, text="×", bg=CARD, fg=FAINT, font=(self.f_label[0], 12), cursor="hand2")

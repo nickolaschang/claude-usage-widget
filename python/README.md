@@ -13,8 +13,8 @@ See the [main README](../README.md) for what the numbers mean and the privacy no
 ## Quick start
 
 ```sh
-git clone https://github.com/nickolaschang/claude-usage-widget.git
-cd claude-usage-widget
+git clone https://github.com/nickolaschang/usage-widget.git
+cd usage-widget
 
 python3 python/claude_usage.py              # numbers in the terminal, proves it can read your data
 python3 python/claude_usage_widget.py &     # the floating window
@@ -60,7 +60,7 @@ it executable (`chmod +x`). The `30s` in the name is the refresh interval.
 
 ```sh
 #!/bin/sh
-exec python3 /path/to/claude-usage-widget/python/claude_usage.py --format xbar
+exec python3 /path/to/usage-widget/python/claude_usage.py --format xbar
 ```
 
 **GNOME: Argos.** Same script, saved in `~/.config/argos/`.
@@ -69,7 +69,7 @@ exec python3 /path/to/claude-usage-widget/python/claude_usage.py --format xbar
 
 ```json
 "custom/claude": {
-    "exec": "python3 /path/to/claude-usage-widget/python/claude_usage.py --format waybar",
+    "exec": "python3 /path/to/usage-widget/python/claude_usage.py --format waybar",
     "return-type": "json",
     "interval": 30
 }
@@ -84,7 +84,7 @@ exec python3 /path/to/claude-usage-widget/python/claude_usage.py --format xbar
 ```ini
 [module/claude]
 type = custom/script
-exec = python3 /path/to/claude-usage-widget/python/claude_usage.py --format oneline
+exec = python3 /path/to/usage-widget/python/claude_usage.py --format oneline
 interval = 30
 ```
 
@@ -115,32 +115,32 @@ Max login: API key sessions are not given limit data.
 Ask yourself whether you want this first. These are the standard recipes for each desktop. They
 have not been tried by the maintainer, who is on Windows, so please report back.
 
-macOS, save as `~/Library/LaunchAgents/local.claude-usage-widget.plist`, then run
-`launchctl load ~/Library/LaunchAgents/local.claude-usage-widget.plist`:
+macOS, save as `~/Library/LaunchAgents/local.usage-widget.plist`, then run
+`launchctl load ~/Library/LaunchAgents/local.usage-widget.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>local.claude-usage-widget</string>
+  <key>Label</key><string>local.usage-widget</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/python3</string>
-    <string>/path/to/claude-usage-widget/python/claude_usage_widget.py</string>
+    <string>/path/to/usage-widget/python/claude_usage_widget.py</string>
   </array>
   <key>RunAtLoad</key><true/>
 </dict>
 </plist>
 ```
 
-Linux (most desktops), save as `~/.config/autostart/claude-usage-widget.desktop`:
+Linux (most desktops), save as `~/.config/autostart/usage-widget.desktop`:
 
 ```ini
 [Desktop Entry]
 Type=Application
-Name=Claude Usage Widget
-Exec=python3 /path/to/claude-usage-widget/python/claude_usage_widget.py
+Name=Usage Widget
+Exec=python3 /path/to/usage-widget/python/claude_usage_widget.py
 X-GNOME-Autostart-enabled=true
 ```
 

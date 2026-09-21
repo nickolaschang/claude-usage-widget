@@ -8,7 +8,7 @@ See the [main README](../README.md) for what the numbers mean and the privacy no
 ## Install and run
 
 1. Put the repository (or the Windows release zip) anywhere. A path without spaces keeps things
-   simple, for example `C:\Tools\claude-usage-widget`. Keep `pricing.json` one folder above
+   simple, for example `C:\Tools\usage-widget`. Keep `pricing.json` one folder above
    `windows\`, as it is in the repository and the zip.
 2. Double-click `windows\Start-ClaudeUsageWidget.vbs`. The widget opens with no console window.
 
@@ -49,7 +49,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\Install-StatusLine
 {
   "statusLine": {
     "type": "command",
-    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Tools/claude-usage-widget/windows/Write-RateLimitFeed.ps1",
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Tools/usage-widget/windows/Write-RateLimitFeed.ps1",
     "refreshInterval": 60
   }
 }
@@ -86,7 +86,7 @@ State lives in `%LOCALAPPDATA%\ClaudeUsageWidget`.
 ## Uninstall
 
 Exit the widget, untick Start with Windows if you enabled it (or delete
-`Claude Usage Widget.lnk` from your Startup folder), run the installer with `-Action Remove`,
+`Usage Widget.lnk` from your Startup folder), run the installer with `-Action Remove`,
 then delete this folder and `%LOCALAPPDATA%\ClaudeUsageWidget`.
 
 ## Files

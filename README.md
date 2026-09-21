@@ -1,13 +1,13 @@
-# Claude usage widget
+# Usage widget for Claude Code
 
-[![tests](https://github.com/nickolaschang/claude-usage-widget/actions/workflows/tests.yml/badge.svg)](https://github.com/nickolaschang/claude-usage-widget/actions/workflows/tests.yml)
+[![tests](https://github.com/nickolaschang/usage-widget/actions/workflows/tests.yml/badge.svg)](https://github.com/nickolaschang/usage-widget/actions/workflows/tests.yml)
 
 A tiny always-on-top desktop widget that shows how much Claude Code you have been using, and how
 much of your 5 hour and weekly limits you have left. Fully local: it reads the files Claude Code
 already keeps on your disk and makes no network requests.
 
 ```
- o CLAUDE USAGE               x
+ o CLAUDE CODE USAGE          x
               est. cost  tokens
  Last 5h        $12.40    18.2M
  Today          $31.02    44.9M
@@ -38,8 +38,8 @@ This is an unofficial community tool. It is not made by, endorsed by, or affilia
 Get it either way:
 
 - **Download**: grab the zip for your platform from the
-  [latest release](https://github.com/nickolaschang/claude-usage-widget/releases/latest).
-- **Clone**: `git clone https://github.com/nickolaschang/claude-usage-widget.git`. It is small,
+  [latest release](https://github.com/nickolaschang/usage-widget/releases/latest).
+- **Clone**: `git clone https://github.com/nickolaschang/usage-widget.git`. It is small,
   you get both editions, and `git pull` updates it.
 
 ## Or install it as a Claude Code plugin
@@ -47,7 +47,7 @@ Get it either way:
 If you live in Claude Code anyway, let it do the setup. In a Claude Code session:
 
 ```
-/plugin marketplace add nickolaschang/claude-usage-widget
+/plugin marketplace add nickolaschang/usage-widget
 /plugin install usage-widget@usage-widget
 ```
 

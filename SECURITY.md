@@ -16,7 +16,7 @@ crafted transcript or feed file do harm.
 
 Please report it privately, not in a public issue:
 
-**https://github.com/nickolaschang/claude-usage-widget/security/advisories/new**
+**https://github.com/nickolaschang/usage-widget/security/advisories/new**
 
 (That is the repository's Security tab, then "Report a vulnerability".)
 

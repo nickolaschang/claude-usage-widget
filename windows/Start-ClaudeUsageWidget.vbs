@@ -1,4 +1,4 @@
-' Launches the Claude usage widget with no console window.
+' Launches the usage widget for Claude Code with no console window.
 ' Tries PowerShell 7 (pwsh) first and falls back to Windows PowerShell.
 Option Explicit
 Dim shell, fso, here, args

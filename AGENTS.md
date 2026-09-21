@@ -77,7 +77,7 @@ Uninstalling: exit the widget, remove any autostart entry, run the installer wit
 ## The Claude Code plugin
 
 If the user has Claude Code, the plugin is the easiest install: `/plugin marketplace add
-nickolaschang/claude-usage-widget`, then `/plugin install usage-widget@usage-widget`. It gives
+nickolaschang/usage-widget`, then `/plugin install usage-widget@usage-widget`. It gives
 them `/usage-widget:start`, `stop`, `usage`, `status`, `setup` and `uninstall`.
 
 How it is built, and the rules that keep it working:
@@ -131,6 +131,6 @@ How it is built, and the rules that keep it working:
 - Commits: small, one concern each, imperative subject line. No AI co-author or
   "generated with" trailers. Nothing personal in the repository: no usernames, home folder
   paths, machine names, or real usage figures in docs, tests, or screenshots. Docs use
-  placeholder paths such as `C:/Tools/claude-usage-widget`.
+  placeholder paths such as `C:/Tools/usage-widget`.
 - State files (`state.json`, `ratelimits.json`, `engine-cache.json`, `widget.log`,
   `statusline-last-input.json`) live in the state folder, never in the repository.
