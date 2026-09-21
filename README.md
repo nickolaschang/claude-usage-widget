@@ -42,6 +42,32 @@ Get it either way:
 - **Clone**: `git clone https://github.com/nickolaschang/claude-usage-widget.git`. It is small,
   you get both editions, and `git pull` updates it.
 
+## Or install it as a Claude Code plugin
+
+If you live in Claude Code anyway, let it do the setup. In a Claude Code session:
+
+```
+/plugin marketplace add nickolaschang/claude-usage-widget
+/plugin install usage-widget@usage-widget
+```
+
+| Then run | What it does |
+| --- | --- |
+| `/usage-widget:start` | Opens the widget on your desktop |
+| `/usage-widget:usage` | Prints your cost, tokens and remaining limits right in the chat, no window |
+| `/usage-widget:setup` | Adds the status line feed that powers the 5 hour and weekly limit rows |
+| `/usage-widget:status` | Is it running, is the feed set up, how fresh is the limit data |
+| `/usage-widget:stop` | Closes the widget |
+| `/usage-widget:uninstall` | Removes the widget, its status line and its startup shortcut |
+
+You can also just ask, for example "open the usage widget" or "how much of my weekly limit is
+left". `setup` and `uninstall` change your settings, so Claude never starts those on its own.
+
+Add the marketplace as `owner/repo` exactly as shown, not as a link to a file. To update later:
+`/plugin marketplace update usage-widget`, then `/plugin update usage-widget`.
+
+## Without the window
+
 On macOS and Linux you do not have to use the floating window at all. The same engine prints one
 line for [SwiftBar, xbar, Argos, waybar, or polybar](python/README.md#menu-bars-and-status-bars),
 which is often the more natural home for a tiny widget on those desktops.
@@ -105,6 +131,11 @@ on this machine.
 - `statusline-last-input.json` is a troubleshooting aid holding the last status line input from
   Claude Code. It includes local metadata such as your working directory and session id, so do
   not paste it into a public bug report without looking at it first.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for what the software touches and how to report a vulnerability
+privately.
 
 ## License
 

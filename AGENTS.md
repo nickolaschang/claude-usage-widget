@@ -16,6 +16,7 @@ under `~/.claude/projects` and an optional status line feed. It makes no network
 | `python/` | Portable edition for macOS and Linux (also runs on Windows). Python 3.9+, standard library only. Floating Tk window plus one-line output for menu bars and status bars. |
 | `pricing.json` | The only place prices live. Both editions read it. |
 | `python/tests/` | All tests, including a check that the two engines agree. |
+| `.claude-plugin/`, `skills/`, `plugin/` | The Claude Code plugin. The repository root is the plugin and its own marketplace. |
 
 ## Setting it up for a user
 
@@ -72,6 +73,40 @@ Privacy rules while you work:
 
 Uninstalling: exit the widget, remove any autostart entry, run the installer with `Remove` /
 `remove`, then delete this folder and the state folder.
+
+## The Claude Code plugin
+
+If the user has Claude Code, the plugin is the easiest install: `/plugin marketplace add
+nickolaschang/claude-usage-widget`, then `/plugin install usage-widget@usage-widget`. It gives
+them `/usage-widget:start`, `stop`, `usage`, `status`, `setup` and `uninstall`.
+
+How it is built, and the rules that keep it working:
+
+- **Skills are thin.** Each `skills/<verb>/SKILL.md` runs `plugin/widget.sh <verb>` (macOS, Linux,
+  Git Bash) or `plugin/widget.ps1 <verb>` (Windows) and relays the output. Behaviour lives in those
+  two scripts, where it is tested. Do not move logic into the skill text.
+- **Nothing persistent may point into the plugin folder.** Claude Code installs a plugin into a
+  cache folder named after its version, so `${CLAUDE_PLUGIN_ROOT}` moves on every update and old
+  folders are swept after about two weeks. Every verb first copies the app to a stable folder
+  (`%LOCALAPPDATA%\ClaudeUsageWidget\app`, `~/Library/Application Support/ClaudeUsageWidget/app`,
+  `${XDG_DATA_HOME:-~/.local/share}/claude-usage-widget/app`) and works from there. The status
+  line and any startup shortcut must only ever hold that stable path. A test enforces it.
+- **A plugin cannot set `statusLine` itself.** Claude Code only honours `agent` and
+  `subagentStatusLine` from a plugin's settings. That is why `setup` runs the safe installer.
+- **`setup` and `uninstall` are user-only** (`disable-model-invocation: true`), because they change
+  the user's settings or delete things. Exit code 2 from `setup` means the user already has a
+  status line: stop and ask.
+- **Bump `version` in `.claude-plugin/plugin.json` on every release**, to the same number as the
+  tag and the changelog. Users are pinned to that string and get no update until it changes. The
+  release workflow fails if the tag and the version disagree.
+- **Names.** The plugin is `usage-widget`, and the name is immutable once people have it installed.
+  Anthropic's terms allow describing what a product works with ("for Claude Code") but not using
+  "Claude" or "Anthropic" inside the product, plugin or marketplace name. A test enforces it.
+- Only `plugin.json` and `marketplace.json` live in `.claude-plugin/`. Contributor instructions
+  live in `.claude/CLAUDE.md`, because a root `CLAUDE.md` is not loaded for plugin users.
+- Check your work: `claude plugin validate . --strict`, the same for
+  `.claude-plugin/plugin.json` and `skills`, and try it for real with
+  `claude --plugin-dir . -p "/usage-widget:status"`.
 
 ## Changing the code
 
