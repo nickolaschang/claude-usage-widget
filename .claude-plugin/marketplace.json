@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "usage-widget",
+  "description": "Usage Widget: a desktop widget showing your Claude Code cost, tokens and remaining limits.",
+  "owner": {
+    "name": "nickolaschang",
+    "url": "https://github.com/nickolaschang"
+  },
+  "plugins": [
+    {
+      "name": "usage-widget",
+      "displayName": "Usage Widget",
+      "description": "A tiny always-on-top desktop widget for your Claude Code usage: API-equivalent cost, tokens, and how much of your 5 hour and weekly limits is left. Fully local. Windows, macOS and Linux.",
+      "author": {
+        "name": "nickolaschang"
+      },
+      "category": "monitoring",
+      "source": "./",
+      "homepage": "https://github.com/nickolaschang/claude-usage-widget"
+    }
+  ]
+}
