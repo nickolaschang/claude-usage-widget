@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import queue
 import sys
@@ -121,6 +122,184 @@ class Tooltip:
             self.window = None
 
 
+def blend(colour_a, colour_b, share):
+    """Mix two #RRGGBB colours. share is how much of colour_b goes in."""
+    a = [int(colour_a[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(colour_b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02X%02X%02X" % tuple(int(round(x + (y - x) * share)) for x, y in zip(a, b))
+
+
+class Gauge:
+    """Shared behaviour of the ring and the bar. set() glides from whatever is showing to the new
+    value with an ease-out, and the gauge turns red once LOW_PERCENT or less is left."""
+
+    SECONDS = 1.1
+
+    def __init__(self, widget):
+        self.widget = widget        # what gets packed; also owns the animation timer
+        self.shown = 0.0            # fraction currently drawn
+        self.target = None          # fraction we are heading for
+        self.low = None
+        self._job = None
+
+    def set(self, left_percent):
+        target = max(0.0, min(100.0, left_percent)) / 100.0
+        low = left_percent <= cu.LOW_PERCENT
+        if low != self.low:
+            self.low = low
+            self._restyle()
+        if self.target is None or abs(target - self.target) > 0.0005:
+            self.target, self._start, self._began = target, self.shown, time.monotonic()
+            self._step()
+
+    def replay(self):
+        """Empty the gauge so the next set() sweeps in from nothing."""
+        self.shown, self.target = 0.0, None
+        self._draw()
+
+    def _step(self):
+        try:
+            if self._job is not None:
+                self.widget.after_cancel(self._job)
+                self._job = None
+            progress = min(1.0, (time.monotonic() - self._began) / self.SECONDS)
+            self.shown = self._start + (self.target - self._start) * (1 - (1 - progress) ** 3)
+            self._draw()
+            if progress < 1.0:
+                self._job = self.widget.after(16, self._step)
+        except tk.TclError:
+            pass                                            # the widget went away mid-animation
+
+    def _restyle(self):
+        raise NotImplementedError
+
+    def _draw(self):
+        raise NotImplementedError
+
+
+def _rgb(colour):
+    return tuple(int(colour[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _clamp01(value):
+    return 0.0 if value < 0.0 else 1.0 if value > 1.0 else value
+
+
+_RING_GEOMETRY = {}
+
+
+def _ring_geometry(size, radius, thickness):
+    """Everything about a ring that does not depend on its value, worked out once per size:
+    for each pixel its distance and clockwise angle from 12 o'clock, how much of it the ring band
+    covers, how strong the glow is there, and the track colour already blended onto the card."""
+    key = (size, radius, thickness)
+    if key not in _RING_GEOMETRY:
+        centre, half = size / 2.0, thickness / 2.0
+        card, track = _rgb(CARD), _rgb(TRACK)
+        pixels = []
+        for y in range(size):
+            for x in range(size):
+                dx, dy = x + 0.5 - centre, y + 0.5 - centre
+                distance = math.hypot(dx, dy)
+                off_band = abs(distance - radius) - half                   # < 0 inside the band
+                band = _clamp01(0.5 - off_band)                            # one pixel of anti-aliasing
+                glow = 0.55 * math.exp(-(max(0.0, off_band) / 2.0) ** 2)
+                angle = math.atan2(dx, -dy) % (2 * math.pi)
+                base = tuple(c + (t - c) * band for c, t in zip(card, track))
+                pixels.append((x + 0.5, y + 0.5, distance, angle, band, glow, base))
+        _RING_GEOMETRY[key] = pixels
+    return _RING_GEOMETRY[key]
+
+
+class Ring(Gauge):
+    """A ring that shows what is LEFT, draining clockwise from 12 o'clock, with rounded ends and a
+    soft glow. While the limit is low it turns red and slowly breathes.
+
+    Tk's canvas has no anti-aliasing and no blur, and at this size its arcs turn into blobs, so the
+    ring is rendered here pixel by pixel into a PhotoImage and blended onto the card colour. The
+    per-pixel geometry is cached, so a frame is only a few hundred cheap operations."""
+
+    def __init__(self, parent, diameter=14, thickness=2.6):
+        self._size = int(diameter + 6)                       # room around the ring for the glow
+        self._radius = (diameter - thickness) / 2.0
+        self._thickness = thickness
+        self._image = tk.PhotoImage(width=self._size, height=self._size)
+        super().__init__(tk.Label(parent, image=self._image, bg=CARD, bd=0, highlightthickness=0))
+        self._strength = 1.0                                 # dimmed and restored by the breathing
+        self._phase = 0.0
+        self._pulse = None
+        self._draw()
+
+    def _restyle(self):
+        self._draw()
+        if self.low and self._pulse is None:
+            self._breathe()
+
+    def _breathe(self):
+        self._pulse = None
+        try:
+            if not self.low:
+                self._strength = 1.0
+                self._draw()
+                return
+            self._phase += 0.2
+            self._strength = 1.0 - 0.6 * (0.5 * (1 - math.cos(self._phase)))      # about two seconds a cycle
+            self._draw()
+            self._pulse = self.widget.after(60, self._breathe)
+        except tk.TclError:
+            pass
+
+    def _draw(self):
+        colour = _rgb(HOT if self.low else ACCENT)
+        strength = self._strength
+        size, radius, half = self._size, self._radius, self._thickness / 2.0
+        centre = size / 2.0
+        sweep = 2 * math.pi * self.shown
+        full, empty = self.shown >= 0.999, self.shown <= 0.004
+        end_x, end_y = centre + radius * math.sin(sweep), centre - radius * math.cos(sweep)
+        start_x, start_y = centre, centre - radius
+
+        rows, row = [], []
+        for px, py, distance, angle, band, glow, base in _ring_geometry(size, radius, self._thickness):
+            if empty:
+                lit = 0.0
+            elif full:
+                lit = 1.0
+            else:
+                # How far, in pixels along the ring, this pixel is inside the lit part of the arc.
+                lit = min(_clamp01(angle * distance + 0.5), _clamp01((sweep - angle) * distance + 0.5))
+            arc = band * lit
+            if not empty and not full:
+                # Rounded ends: a dot the width of the ring at each end of the arc.
+                arc = max(arc, _clamp01(half + 0.5 - math.hypot(px - end_x, py - end_y)),
+                          _clamp01(half + 0.5 - math.hypot(px - start_x, py - start_y)))
+            halo = glow * lit * strength * (1.0 - arc)
+            solid = arc * strength
+            red, green, blue = (b + (c - b) * halo for b, c in zip(base, colour))
+            row.append("#%02x%02x%02x" % (int(red + (colour[0] - red) * solid), int(green + (colour[1] - green) * solid),
+                                          int(blue + (colour[2] - blue) * solid)))
+            if len(row) == size:
+                rows.append("{" + " ".join(row) + "}")
+                row = []
+        self._image.put(" ".join(rows))
+
+
+class Bar(Gauge):
+    """The wide bar under a limit row. Same draining and easing as the ring."""
+
+    def __init__(self, parent):
+        # width=1: a Canvas asks for 10cm by default, which would force the whole card wide.
+        super().__init__(tk.Canvas(parent, width=1, height=4, bg=TRACK, highlightthickness=0))
+        self._fill = self.widget.create_rectangle(0, 0, 0, 4, outline="", fill=ACCENT)
+        self.widget.bind("<Configure>", lambda _event: self._draw())
+
+    def _restyle(self):
+        self.widget.itemconfigure(self._fill, fill=HOT if self.low else ACCENT)
+
+    def _draw(self):
+        self.widget.coords(self._fill, 0, 0, int(self.widget.winfo_width() * self.shown), self.widget.winfo_height())
+
+
 class WidgetApp:
     ROWS = (("Last 5h", "h5"), ("Today", "today"), ("7 days", "d7"))
 
@@ -133,6 +312,9 @@ class WidgetApp:
         self._drag_from = None
         self._moved = False
         self._menu_open = False
+        self._last_event = 0.0
+        self._rows, self._row_order = {}, None        # limit rows are built once, then updated in place
+        self._pill_parts, self._pill_order = {}, None
         self._results = queue.Queue()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -233,6 +415,7 @@ class WidgetApp:
 
         self.limit_rows = tk.Frame(self.full, bg=CARD)
         self.limit_rows.pack(fill="x")
+        self.as_of = tk.Label(self.full, text="", bg=CARD, fg=FAINT, font=self.f_small, anchor="w")    # packed when stale
         self.split = tk.Label(self.full, text="", bg=CARD, fg=LABEL, font=self.f_small, anchor="w")
         self.split.pack(fill="x", pady=(6, 0))
         self.footer = tk.Label(self.full, text="starting", bg=CARD, fg=FAINT, font=self.f_small, anchor="w")
@@ -241,7 +424,8 @@ class WidgetApp:
         self.pill = tk.Frame(self.card, bg=CARD)
         self.pill_dot = self._dot(self.pill)
         self.pill_dot.pack(side="left", padx=(0, 6))
-        self.pill_text = tk.Label(self.pill, text="...", bg=CARD, fg=VALUE, font=(self.f_dim[0], 9))
+        self.pill_items = tk.Frame(self.pill, bg=CARD)          # ring + "5h 84%" pairs, once there is a limit feed
+        self.pill_text = tk.Label(self.pill, text="...", bg=CARD, fg=VALUE, font=(self.f_dim[0], 9))   # no feed: cost headline
         self.pill_text.pack(side="left")
         for widget in (self.pill, self.pill_text):
             Tooltip(widget, self._pill_tip, self.f_small)
@@ -331,6 +515,12 @@ class WidgetApp:
     def set_compact(self, compact):
         before = self._box()
         self._show_view(bool(compact))
+        # A little flourish: the gauges of the view that just appeared sweep in from empty.
+        for part in list(self._pill_parts.values() if self.compact else self._rows.values()):
+            for gauge in part["gauges"]:
+                gauge.replay()
+        if self.summary is not None:
+            self._fill(self.summary, self.limits, self._last_event)
         self._reanchor(before)
         self._save_state()
 
@@ -438,9 +628,14 @@ class WidgetApp:
             self.root.after(250, self._poll)
 
     def render(self, summary, limits, last_event=0.0, now=None):
-        now = time.time() if now is None else now
         before = self._box()
-        self.summary, self.limits = summary, limits
+        self._fill(summary, limits, last_event, now)
+        if self._drag_from is None:
+            self._reanchor(before)
+
+    def _fill(self, summary, limits, last_event=0.0, now=None):
+        now = time.time() if now is None else now
+        self.summary, self.limits, self._last_event = summary, limits, last_event
 
         for _caption, key in self.ROWS:
             cost, tokens = self.cells[key]
@@ -448,54 +643,95 @@ class WidgetApp:
             tokens.configure(text=cu.fmt_tokens(summary[key]["tokens"]))
         self.split.configure(text=cu.model_split(summary["today"]) or "no usage yet today")
 
-        for child in self.limit_rows.winfo_children():
-            child.destroy()
-        for window in (limits or {}).get("windows", []):
-            self._limit_row(window, now)
+        # Rows and pill items are built once and then updated in place. Rebuilding them on every
+        # refresh would restart the gauge animations each time and make tooltips flicker.
+        windows = (limits or {}).get("windows", [])
+        order = [window["name"] for window in windows]
+        if order != self._row_order:
+            self._row_order = order
+            for child in self.limit_rows.winfo_children():
+                child.destroy()
+            self._rows = {window["name"]: self._new_row(window) for window in windows}
+        for window in windows:
+            self._update_row(self._rows[window["name"]], window, now)
+
         if limits and limits["stale"]:
             read_at = time.localtime(limits["updated"])
             same_day = read_at[:3] == time.localtime(now)[:3]
-            text = "limits as of " + time.strftime("%H:%M" if same_day else "%a %H:%M", read_at)
-            tk.Label(self.limit_rows, text=text, bg=CARD, fg=FAINT, font=self.f_small, anchor="w").pack(fill="x")
+            self.as_of.configure(text="limits as of " + time.strftime("%H:%M" if same_day else "%a %H:%M", read_at))
+            self.as_of.pack(fill="x", after=self.limit_rows)
+        else:
+            self.as_of.pack_forget()
 
         live = now - last_event <= 120
         for canvas in (self.dot, self.pill_dot):
             canvas.itemconfigure("dot", fill=ACCENT if live else IDLE)
-        self.pill_text.configure(text=cu.oneline(summary, limits),
-                                 fg=HOT if cu.lowest_left(limits) <= cu.LOW_PERCENT else VALUE)
+        self._fill_pill(summary, limits, windows)
         self.footer.configure(text=self.engine.pricing.warning or time.strftime("updated %H:%M:%S", time.localtime(now)))
 
-        if self._drag_from is None:
-            self._reanchor(before)
+    def _new_row(self, window):
+        """Label on the left; ring, then "NN% left . resets 3d 4h" on the right; and a bar underneath.
+        Ring and bar both drain as the allowance is used, and turn red for the last 15%."""
+        row = {"tip": ""}
+        frame = tk.Frame(self.limit_rows, bg=CARD)
+        frame.pack(fill="x", pady=(6, 0))
+        name = tk.Label(frame, text=window["label"], bg=CARD, fg=LABEL, font=self.f_label)
+        name.pack(side="left")
+        row["value"] = tk.Label(frame, text="", bg=CARD, fg=DIM, font=self.f_dim)
+        row["value"].pack(side="right", padx=(2, 0))
+        ring = Ring(frame, diameter=13, thickness=2.4)
+        ring.widget.pack(side="right", padx=(9, 0))
+        bar = Bar(self.limit_rows)
+        bar.widget.pack(fill="x", pady=(2, 0))
+        row["gauges"] = (ring, bar)
+        for widget in (name, row["value"], ring.widget, bar.widget):
+            Tooltip(widget, lambda row=row: row["tip"], self.f_small)
+        return row
 
-    def _limit_row(self, window, now):
-        """Label on the left, "NN% left . resets 3d 4h" on the right, and a bar that drains as the
-        allowance is used (full = plenty left), turning red for the last 15%."""
+    def _update_row(self, row, window, now):
         text = "%.0f%% left" % window["left"]
         tip = "%.0f%% used" % window["used"]
         if window["resets"]:
             text += " %s resets %s" % (cu.DOT, cu.fmt_span(window["resets"] - now))
             tip += ", resets " + time.strftime("%a %d %b %H:%M", time.localtime(window["resets"]))
-        row = tk.Frame(self.limit_rows, bg=CARD)
-        row.pack(fill="x", pady=(6, 0))
-        name = tk.Label(row, text=window["label"], bg=CARD, fg=LABEL, font=self.f_label)
-        name.pack(side="left")
-        value = tk.Label(row, text=text, bg=CARD, fg=DIM, font=self.f_dim)
-        value.pack(side="right", padx=(12, 0))
+        row["value"].configure(text=text)
+        row["tip"] = tip
+        for gauge in row["gauges"]:
+            gauge.set(window["left"])
 
-        # width=1: a Canvas asks for 10cm by default, which would force the whole card wide.
-        bar = tk.Canvas(self.limit_rows, width=1, height=4, bg=TRACK, highlightthickness=0)
-        bar.pack(fill="x", pady=(2, 0))
-        colour = HOT if window["left"] <= cu.LOW_PERCENT else ACCENT
-        fraction = window["left"] / 100.0
+    def _fill_pill(self, summary, limits, windows):
+        """The pill shows a ring and "5h 84%" per limit, or the cost headline when there is no feed."""
+        short = {"five_hour": "5h", "seven_day": "wk"}
+        shown = [w for w in windows if w["name"] in short] or windows[:2]
+        order = [w["name"] for w in shown]
+        if order != self._pill_order:
+            self._pill_order = order
+            for child in self.pill_items.winfo_children():
+                child.destroy()
+            self._pill_parts = {}
+            for index, window in enumerate(shown):
+                ring = Ring(self.pill_items)
+                ring.widget.pack(side="left", padx=(7 if index else 0, 2))
+                label = tk.Label(self.pill_items, text="", bg=CARD, fg=VALUE, font=(self.f_dim[0], 9))
+                label.pack(side="left")
+                self._pill_parts[window["name"]] = {"label": label, "gauges": (ring,)}
+            if shown:
+                tk.Label(self.pill_items, text="left", bg=CARD, fg=FAINT, font=(self.f_dim[0], 9)).pack(side="left", padx=(6, 0))
+            for widget in self.pill_items.winfo_children():
+                Tooltip(widget, self._pill_tip, self.f_small)
 
-        def draw(event, canvas=bar, colour=colour, fraction=fraction):
-            canvas.delete("fill")
-            canvas.create_rectangle(0, 0, int(event.width * fraction), event.height, fill=colour, outline="", tags="fill")
-
-        bar.bind("<Configure>", draw)
-        for widget in (name, value, bar):
-            Tooltip(widget, lambda tip=tip: tip, self.f_small)
+        if shown:
+            for window in shown:
+                part = self._pill_parts[window["name"]]
+                part["label"].configure(text="%s %.0f%%" % (short.get(window["name"], window["label"]), window["left"]),
+                                        fg=HOT if window["left"] <= cu.LOW_PERCENT else VALUE)
+                part["gauges"][0].set(window["left"])
+            self.pill_text.pack_forget()
+            self.pill_items.pack(side="left")
+        else:
+            self.pill_items.pack_forget()
+            self.pill_text.configure(text=cu.oneline(summary, limits))
+            self.pill_text.pack(side="left")
 
     def _bucket_tip(self, key):
         if not self.summary:

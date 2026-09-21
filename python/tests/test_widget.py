@@ -38,9 +38,12 @@ class Window(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def texts(self, parent):
+        """Text of every label that is actually laid out (hidden alternatives are skipped)."""
         found = []
         for child in parent.winfo_children():
-            if child.winfo_class() == "Label":
+            if not child.winfo_manager():
+                continue
+            if child.winfo_class() == "Label" and child.cget("text"):        # a ring is an image-only label
                 found.append(child.cget("text"))
             found += self.texts(child)
         return found
@@ -90,10 +93,28 @@ class Window(unittest.TestCase):
         self.assertTrue(any(text.startswith("88% left") for text in shown))
         full_size = (self.root.winfo_reqwidth(), self.root.winfo_reqheight())
 
+        # Every percentage has a ring gauge next to it, heading for the share that is left.
+        for name, left in (("five_hour", 0.88), ("seven_day", 0.10)):
+            ring, bar = self.app._rows[name]["gauges"]
+            self.assertAlmostEqual(ring.target, left)
+            self.assertAlmostEqual(bar.target, left)
+            self.assertEqual(ring.low, left <= 0.15)
+
         self.app.set_compact(True)
         self.root.update()
-        self.assertEqual(self.app.pill_text.cget("text"), "5h 88%% %s wk 10%% left" % cu.DOT)
-        self.assertEqual(self.app.pill_text.cget("fg"), "#E5484D", "a limit at 10% left must turn the pill red")
+        self.assertEqual(self.texts(self.app.pill), ["5h 88%", "wk 10%", "left"])
+        week = self.app._pill_parts["seven_day"]
+        self.assertEqual(week["label"].cget("fg"), "#E5484D", "a limit at 10% left must turn red")
+        self.assertTrue(week["gauges"][0].low)
+        self.assertFalse(self.app._pill_parts["five_hour"]["gauges"][0].low)
+        self.assertAlmostEqual(week["gauges"][0].target, 0.10)
+
+        # The sweep is an animation: let it run and check it lands exactly on the target.
+        deadline = time.time() + 3
+        while time.time() < deadline and abs(week["gauges"][0].shown - 0.10) > 1e-6:
+            self.root.update()
+            time.sleep(0.01)
+        self.assertAlmostEqual(week["gauges"][0].shown, 0.10, places=5)
         pill_size = (self.root.winfo_reqwidth(), self.root.winfo_reqheight())
         self.assertLess(pill_size[1], full_size[1] / 2)
         self.assertLess(pill_size[0], full_size[0])
@@ -105,7 +126,11 @@ class Window(unittest.TestCase):
         self.app.render(summary, None, last_event=0, now=now)          # feed gone: limit rows disappear
         self.root.update()
         self.assertNotIn("5h limit", self.texts(self.app.full))
-        self.assertEqual(self.app.pill_text.cget("text"), "5h $77.26 %s today $121" % cu.DOT)
+        self.assertEqual(self.app._rows, {})
+        self.app.set_compact(True)
+        self.root.update()
+        self.assertEqual(self.texts(self.app.pill), ["5h $77.26 %s today $121" % cu.DOT], "no feed: cost headline, no rings")
+        self.app.set_compact(False)
 
         self.app.set_compact(True)
         with open(self.state, encoding="utf-8") as handle:
