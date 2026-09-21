@@ -1,0 +1,11 @@
+# The widget keeps its state in %LOCALAPPDATA%\ClaudeUsageWidget, never in this folder.
+# These are here so a stray copy of that data can never be committed by accident.
+*.log
+*.tmp
+state.json
+ratelimits.json
+statusline-last-input.json
+
+# Windows noise
+Thumbs.db
+desktop.ini
