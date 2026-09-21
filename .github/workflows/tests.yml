@@ -9,6 +9,36 @@ permissions:
   contents: read
 
 jobs:
+  # People download one zip per platform, so each zip has to work without the other edition's folder.
+  packages:
+    name: release zips work standalone
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build and unpack both zips the way the release workflow does
+        shell: bash
+        run: |
+          shared="pricing.json README.md LICENSE AGENTS.md"
+          git archive --format=zip --prefix=w/ -o w.zip HEAD windows $shared
+          git archive --format=zip --prefix=p/ -o p.zip HEAD python $shared
+          mkdir out && cd out && unzip -q ../w.zip && unzip -q ../p.zip
+
+      - name: Portable zip, tests pass without the windows folder
+        shell: bash
+        run: cd out/p && python -m unittest discover -s python/tests -v
+
+      - name: Windows zip, engine runs from the unpacked copy
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\empty" | Out-Null
+          $json = pwsh -NoProfile -File out\w\windows\ClaudeUsageWidget.ps1 -SelfTest -AsJson -ProjectsRoot "$env:RUNNER_TEMP\empty"
+          $json
+          if (($json | ConvertFrom-Json).responses -ne 0) { throw 'expected zero responses from an empty folder' }
+
   engine:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
