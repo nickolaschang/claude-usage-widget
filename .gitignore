@@ -6,6 +6,13 @@ state.json
 ratelimits.json
 statusline-last-input.json
 
+engine-cache.json
+state-python.json
+
+# Python
+__pycache__/
+*.pyc
+
 # Windows noise
 Thumbs.db
 desktop.ini
