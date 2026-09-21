@@ -14,6 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Claude Code pins plugin users to the version string in plugin.json, so a release whose tag
+      # and plugin version disagree would leave them on the old copy without anyone noticing.
+      - name: The tag must match the plugin version
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match plugin.json version $version. Bump .claude-plugin/plugin.json and CHANGELOG.md first."
+            exit 1
+          fi
+
       - name: Build one zip per platform
         run: |
           tag="${GITHUB_REF_NAME}"

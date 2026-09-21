@@ -39,6 +39,22 @@ jobs:
           $json
           if (($json | ConvertFrom-Json).responses -ne 0) { throw 'expected zero responses from an empty folder' }
 
+  # The same check Anthropic's plugin review pipeline runs, in strict mode so warnings fail too.
+  plugin:
+    name: Claude Code plugin validates (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g @anthropic-ai/claude-code
+      - name: Validate the marketplace, the plugin manifest and the skills
+        run: |
+          claude plugin validate . --strict
+          claude plugin validate .claude-plugin/plugin.json --strict
+          claude plugin validate skills --strict
+
   engine:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
