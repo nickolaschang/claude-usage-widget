@@ -293,7 +293,11 @@ class Formatting(unittest.TestCase):
         self.assertEqual(json.loads(cu.render("json", summary, None, engine, NOW))["limits"], None)
 
 
-@unittest.skipUnless(shutil.which("pwsh") and os.name == "nt", "needs PowerShell 7 on Windows")
+WINDOWS_SCRIPT = os.path.join(REPO, "windows", "ClaudeUsageWidget.ps1")
+
+
+@unittest.skipUnless(shutil.which("pwsh") and os.name == "nt" and os.path.isfile(WINDOWS_SCRIPT),
+                     "needs PowerShell 7 on Windows and the windows/ folder (absent from the macOS and Linux zip)")
 class CrossEdition(EngineCase):
     """The Windows edition has its own engine in PowerShell. Both must give the same answer."""
 
@@ -307,8 +311,7 @@ class CrossEdition(EngineCase):
         self.write("a.jsonl", lines + lines[:2])
         self.write(os.path.join("s", "subagents", "agent-1.jsonl"), [lines[0], assistant_line("msg_sub", now - HOUR)])
 
-        script = os.path.join(REPO, "windows", "ClaudeUsageWidget.ps1")
-        done = subprocess.run(["pwsh", "-NoProfile", "-File", script, "-SelfTest", "-AsJson", "-ProjectsRoot", self.root,
+        done = subprocess.run(["pwsh", "-NoProfile", "-File", WINDOWS_SCRIPT, "-SelfTest", "-AsJson", "-ProjectsRoot", self.root,
                                "-PricingPath", PRICING_FILE], capture_output=True, text=True, timeout=120)
         self.assertEqual(done.returncode, 0, done.stderr)
         powershell = json.loads(done.stdout)

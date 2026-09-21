@@ -106,7 +106,8 @@ class PythonInstaller(InstallerContract, unittest.TestCase):
         return done.returncode, done.stdout + done.stderr
 
 
-@unittest.skipUnless(shutil.which("pwsh"), "needs PowerShell 7")
+@unittest.skipUnless(shutil.which("pwsh") and os.path.isfile(PS_INSTALLER),
+                     "needs PowerShell 7 and the windows/ folder (absent from the macOS and Linux zip)")
 class PowerShellInstaller(InstallerContract, unittest.TestCase):
     marker = "Write-RateLimitFeed.ps1"
 
