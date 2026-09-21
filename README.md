@@ -1,9 +1,10 @@
 # Claude usage widget
 
-A tiny always-on-top desktop widget for Windows that shows how much Claude Code you have been
-using, and how much of your 5 hour and weekly limits you have left.
+[![tests](https://github.com/nickolaschang/claude-usage-widget/actions/workflows/tests.yml/badge.svg)](https://github.com/nickolaschang/claude-usage-widget/actions/workflows/tests.yml)
 
-Pure PowerShell + WPF. Nothing to install, nothing to build, and nothing leaves your machine.
+A tiny always-on-top desktop widget that shows how much Claude Code you have been using, and how
+much of your 5 hour and weekly limits you have left. Fully local: it reads the files Claude Code
+already keeps on your disk and makes no network requests.
 
 ```
  o CLAUDE USAGE               x
@@ -25,134 +26,84 @@ Double-click it and it shrinks to a one-line pill:
 
 This is an unofficial community tool. It is not made by, endorsed by, or affiliated with Anthropic.
 
-## Requirements
+## Pick your platform
 
-- Windows 10 or 11
-- [Claude Code](https://code.claude.com/docs) (the widget reads its local session transcripts)
-- PowerShell 7 (`pwsh`) or the built-in Windows PowerShell 5.1
+| You are on | Use | Needs | Status |
+| --- | --- | --- | --- |
+| Windows 10 or 11 | [`windows/`](windows/README.md) | Nothing. PowerShell is built in. | Stable, used daily |
+| macOS | [`python/`](python/README.md) | Python 3.9+ (3.9 ships with the developer tools) | Beta, testers wanted |
+| Linux | [`python/`](python/README.md) | Python 3.9+, `python3-tk` for the floating window | Beta, testers wanted |
 
-## Install and run
+Get it either way:
 
-1. Download or clone this repository anywhere. A path without spaces keeps the optional
-   status line setup simpler, for example `C:\Tools\claude-usage-widget`.
-2. Double-click `Start-ClaudeUsageWidget.vbs`. The widget opens with no console window.
+- **Download**: grab the zip for your platform from the
+  [latest release](https://github.com/nickolaschang/claude-usage-widget/releases/latest).
+- **Clone**: `git clone https://github.com/nickolaschang/claude-usage-widget.git`. It is small,
+  you get both editions, and `git pull` updates it.
 
-Using it:
+On macOS and Linux you do not have to use the floating window at all. The same engine prints one
+line for [SwiftBar, xbar, Argos, waybar, or polybar](python/README.md#menu-bars-and-status-bars),
+which is often the more natural home for a tiny widget on those desktops.
 
-- Drag anywhere to move it. The position is remembered.
-- Double-click to shrink it to the one-line pill, double-click again to expand. The mode is
-  remembered. The pill turns red when any limit has 15% or less left, and hovering it shows the
-  full summary.
-- The widget keeps its nearest screen edges fixed when it changes size, so a pill docked at the
-  right edge of the screen stays at the right edge.
-- Right-click for Refresh now, Compact, Always on top, Start with Windows, Exit.
-- Hover a row for the breakdown (input, output, cache write, cache read, cost per model).
-- The dot in the title turns orange while Claude has answered something in the last 2 minutes.
+**Using an AI agent to set it up?** Point it at [AGENTS.md](AGENTS.md). It covers choosing the
+edition, the safe status line installer, and the mistakes that are easy to make.
 
-To check the numbers in a console without opening the window:
+## What "beta" means here
 
-```powershell
-pwsh -NoProfile -File .\ClaudeUsageWidget.ps1 -SelfTest
-```
+The usage engine is tested on Linux, macOS, and Windows on every push, and the two engines
+(PowerShell and Python) are checked against each other so they always give the same numbers.
+CI also opens a real window on all three systems. What nobody has checked yet is how the Tk
+window looks and behaves on a real Mac or Linux desktop: always-on-top, dragging, and
+borderless windows vary a lot between window managers, and Wayland restricts some of it. If you
+try it, please open an issue and say what you saw, good or bad.
 
 ## Where the numbers come from
 
-Claude Code writes every session to `~\.claude\projects\**\*.jsonl`, including sub-agent and
+Claude Code writes every session to `~/.claude/projects/**/*.jsonl`, including sub-agent and
 workflow transcripts in nested `subagents` folders. Each assistant line carries the API `usage`
 block. The widget:
 
-1. Scans files touched in the last 7 days, then tails only newly appended bytes every 30 seconds.
+1. Scans files touched in the last 7 days, then reads only newly appended bytes every 30 seconds.
 2. De-duplicates by message id. One API response is logged once per content block (up to 4 lines
    with identical usage), and resumed sessions copy old lines into new files. Without this the
    totals would be inflated several times over.
-3. Prices each response at API list rates, including the cache tiers (5 minute write 1.25x input,
-   1 hour write 2x input, cache read 0.1x input, or 0.025x on Fable 5.1).
+3. Prices each response at API list rates from [`pricing.json`](pricing.json), including the
+   cache tiers (5 minute write 1.25x input, 1 hour write 2x input, cache read 0.1x input, or
+   0.025x on Fable 5.1).
 
 "est. cost" is an API-equivalent figure. On a Pro or Max subscription you are not billed this
 amount. It is still the most honest single measure of how hard you are working the models,
 because raw token counts are dominated by cheap cache reads. "Last 5h" is a rolling window, not
 Anthropic's session window.
 
-Prices live in the `$script:Pricing` table at the top of `ClaudeUsageWidget.ps1`. They were
-checked on 21 Sep 2026 against https://platform.claude.com/docs/en/about-claude/pricing. Update
-the table when prices or models change. Fast mode and the US data residency multiplier are not
-modelled. `CLAUDE_CONFIG_DIR` is honoured if you keep your Claude Code data somewhere else.
+Prices were checked on 21 Sep 2026 against https://platform.claude.com/docs/en/about-claude/pricing.
+Edit `pricing.json` when prices or models change. Fast mode and the US data residency multiplier
+are not modelled. `CLAUDE_CONFIG_DIR` is honoured if you keep your Claude Code data elsewhere.
 
-## Limit remainders (5 hour and weekly)
+## Limit remainders
 
 The 5 hour and weekly percentages that `/usage` shows are not in the transcripts. The supported
 local source is the Claude Code [status line](https://code.claude.com/docs/en/statusline), which
 receives a `rate_limits` object (Pro and Max subscribers, after the first response in a session).
-
-`Write-RateLimitFeed.ps1` is a status line command that copies every window it is given to
-`%LOCALAPPDATA%\ClaudeUsageWidget\ratelimits.json`. The widget draws one row per window showing
-what is left ("82% left . resets 3d 4h") with a bar that drains as the allowance is used and
-turns red for the last 15%. The documented windows are `five_hour` and `seven_day`. If Claude
-Code reports more, they appear as extra rows automatically.
-
-To turn it on, add a `statusLine` block to `~\.claude\settings.json`, pointing at wherever you
-put this folder:
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Tools/claude-usage-widget/Write-RateLimitFeed.ps1",
-    "refreshInterval": 60
-  }
-}
-```
-
-Notes:
-
-- Use forward slashes in the path. With Git Bash installed, backslashes get eaten as escapes.
-  If your path contains spaces, wrap it in escaped quotes (`\"C:/My Tools/.../Write-RateLimitFeed.ps1\"`).
-- `-ExecutionPolicy Bypass` is required. Windows PowerShell's default policy is Restricted, so
-  without it the script is refused ("running scripts is disabled on this system") and no feed is
-  ever written. The flag only applies to that one process.
-- The script also prints a short status line such as `Fable 5.1 | 5h 76% left | week 59% left`.
-- If you already have a `statusLine` command, keep yours and copy the feed-writing part of
-  `Write-RateLimitFeed.ps1` into it instead.
+Each edition ships a small status line command that copies those numbers to a local file, and an
+installer that adds it to your `settings.json` without touching anything else. The edition
+READMEs have the steps.
 
 The numbers only move while a Claude Code session is alive, because that is when the status line
-runs. Once the last reading is more than 15 minutes old the widget adds a "limits as of HH:mm"
-note. A window whose reset time has passed shows as 100% left, and a feed older than 8 days is
-ignored. Usage from your other devices only shows up after the next reading on this PC.
+runs. Once the last reading is more than 15 minutes old the widget says so. A window whose reset
+time has passed shows as 100% left. Usage from your other devices shows up after the next reading
+on this machine.
 
 ## Privacy
 
-- The widget makes no network requests. It only reads files on your own disk.
+- No network requests. The widget only reads files on your own disk.
 - It parses your transcript lines in memory and keeps only token counts, model names, message
   ids, and timestamps. Prompt and response text is never stored, logged, or displayed.
-- It writes to `%LOCALAPPDATA%\ClaudeUsageWidget` only: `state.json` (window position and mode),
-  `ratelimits.json` (the limit feed), `widget.log` (errors), and `statusline-last-input.json`.
+- It writes only to its own state folder: window position, the limit feed, an error log, an
+  engine cache (Python edition), and `statusline-last-input.json`.
 - `statusline-last-input.json` is a troubleshooting aid holding the last status line input from
-  Claude Code. It includes local metadata such as your working directory and session id, so
-  do not paste it into a public bug report without looking at it first.
-
-## Troubleshooting
-
-- Nothing appears: look at `%LOCALAPPDATA%\ClaudeUsageWidget\widget.log`.
-- No limit rows: check `statusline-last-input.json` in the same folder. If that file never
-  appears, the status line command is not running (check the path and the `-ExecutionPolicy`
-  flag). If it appears without a `rate_limits` object, Claude Code is not reporting limits for
-  that session (no response yet, or not a Pro or Max login).
-- Test the status line command from Git Bash, not from inside a PowerShell window. A PowerShell
-  session passes its own execution policy to child processes, which hides the problem.
-
-## Uninstall
-
-Exit the widget, untick Start with Windows first if you enabled it (or delete
-`Claude Usage Widget.lnk` from your Startup folder), remove the `statusLine` block from
-`settings.json`, and delete this folder and `%LOCALAPPDATA%\ClaudeUsageWidget`.
-
-## Files
-
-| File | Purpose |
-| --- | --- |
-| `ClaudeUsageWidget.ps1` | The widget and the usage engine |
-| `Start-ClaudeUsageWidget.vbs` | No-console launcher (pwsh, falls back to Windows PowerShell) |
-| `Write-RateLimitFeed.ps1` | Optional status line command that feeds the limit rows |
+  Claude Code. It includes local metadata such as your working directory and session id, so do
+  not paste it into a public bug report without looking at it first.
 
 ## License
 
