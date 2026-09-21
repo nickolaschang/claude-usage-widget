@@ -27,6 +27,16 @@ try { $j = ConvertFrom-Json -InputObject $raw } catch { }
 $dir = Join-Path $env:LOCALAPPDATA 'ClaudeUsageWidget'
 if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
 
+# Claude Code cancels a status line script that is still running when the next update arrives.
+# If that lands between writing the temp file and renaming it, the temp file is orphaned, so
+# sweep up any that are clearly not in use any more.
+try {
+    $staleBefore = (Get-Date).AddMinutes(-1)
+    Get-ChildItem -LiteralPath $dir -Filter 'ratelimits.*.tmp' -File |
+        Where-Object { $_.LastWriteTime -lt $staleBefore } |
+        Remove-Item -Force
+} catch { }
+
 # Diagnostics: keep what Claude Code sent on the most recent run (overwritten every time).
 # If this file never appears, the status line command is not being run at all. If it appears
 # without a rate_limits object, Claude Code is not reporting limits for this session.

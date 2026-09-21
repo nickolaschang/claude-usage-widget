@@ -55,6 +55,59 @@ class Feed(unittest.TestCase):
         self.assertEqual(self.run_feed(""), "Claude")
         self.assertFalse(os.path.exists(self.feed))
 
+    def test_orphaned_temp_files_from_cancelled_runs_are_swept(self):
+        stale, fresh = make_temp_files(self.state)
+        self.run_feed(json.dumps({"rate_limits": {"five_hour": {"used_percentage": 5, "resets_at": int(time.time()) + 60}}}))
+        self.assertFalse(os.path.exists(stale), "a temp file older than a minute is an orphan")
+        self.assertTrue(os.path.exists(fresh), "a recent temp file may belong to a run in progress")
+
+
+def make_temp_files(folder):
+    """One temp file left by a run that was cancelled long ago, one that could still be in use."""
+    os.makedirs(folder, exist_ok=True)
+    stale, fresh = os.path.join(folder, "ratelimits.11111.tmp"), os.path.join(folder, "ratelimits.22222.tmp")
+    for path in (stale, fresh):
+        with open(path, "w") as handle:
+            handle.write("{}")
+    old = time.time() - 600
+    os.utime(stale, (old, old))
+    return stale, fresh
+
+
+WINDOWS_FEED = os.path.join(os.path.dirname(os.path.dirname(HERE)), "windows", "Write-RateLimitFeed.ps1")
+SHELL = shutil.which("pwsh") or shutil.which("powershell")
+
+
+@unittest.skipUnless(os.name == "nt" and SHELL and os.path.isfile(WINDOWS_FEED),
+                     "needs Windows, PowerShell, and the windows/ folder")
+class WindowsFeed(unittest.TestCase):
+    """The PowerShell feed writer and the Python reader are two ends of one file format."""
+
+    def setUp(self):
+        self.local_app_data = tempfile.mkdtemp(prefix="cuw-winfeed-")
+        self.state = os.path.join(self.local_app_data, "ClaudeUsageWidget")
+
+    def tearDown(self):
+        shutil.rmtree(self.local_app_data, ignore_errors=True)
+
+    def test_feed_written_by_powershell_is_read_by_python_and_orphans_are_swept(self):
+        stale, fresh = make_temp_files(self.state)
+        resets = int(time.time()) + 3600
+        payload = json.dumps({"model": {"display_name": "Opus 5"}, "rate_limits": {
+            "seven_day": {"used_percentage": 41.2, "resets_at": resets},
+            "five_hour": {"used_percentage": 23.5, "resets_at": resets}}})
+        done = subprocess.run([SHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", WINDOWS_FEED], input=payload,
+                              capture_output=True, text=True, timeout=120,
+                              env=dict(os.environ, LOCALAPPDATA=self.local_app_data))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), "Opus 5 | 5h 76% left | week 59% left")
+
+        limits = cu.read_rate_limits(os.path.join(self.state, "ratelimits.json"))
+        self.assertEqual([(w["name"], round(w["left"], 1)) for w in limits["windows"]],
+                         [("five_hour", 76.5), ("seven_day", 58.8)])
+        self.assertFalse(os.path.exists(stale))
+        self.assertTrue(os.path.exists(fresh))
+
 
 if __name__ == "__main__":
     unittest.main()

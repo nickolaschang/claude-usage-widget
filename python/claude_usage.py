@@ -79,6 +79,26 @@ def write_atomic(path, text):
     os.replace(tmp, path)
 
 
+def sweep_stale_temp_files(folder, older_than_seconds=60):
+    """Claude Code cancels a status line script that is still running when the next update
+    arrives, and status bars kill slow commands too. If that lands between writing a temp file
+    and renaming it, the temp file is orphaned. Remove any that are clearly no longer in use."""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    cutoff = time.time() - older_than_seconds
+    for name in names:
+        if not name.endswith(".tmp"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+        except OSError:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Pricing
 # ---------------------------------------------------------------------------
@@ -603,6 +623,7 @@ def main(argv=None):
     summary = engine.summary()
     if not args.no_cache:
         try:
+            sweep_stale_temp_files(state_dir())
             engine.save_cache(cache_file)
         except OSError:
             pass

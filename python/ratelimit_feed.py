@@ -19,7 +19,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from claude_usage import state_dir, write_atomic  # noqa: E402
+from claude_usage import state_dir, sweep_stale_temp_files, write_atomic  # noqa: E402
 
 
 def main():
@@ -30,6 +30,7 @@ def main():
         data = None
 
     folder = state_dir()
+    sweep_stale_temp_files(folder)
     # Diagnostics: keep what Claude Code sent on the most recent run (overwritten every time).
     # If this file never appears, the status line command is not being run at all. If it appears
     # without a rate_limits object, Claude Code is not reporting limits for this session.
