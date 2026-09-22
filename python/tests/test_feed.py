@@ -55,6 +55,36 @@ class Feed(unittest.TestCase):
         self.assertEqual(self.run_feed(""), "Claude")
         self.assertFalse(os.path.exists(self.feed))
 
+    def test_a_stale_session_cannot_overwrite_a_newer_reading(self):
+        # Two sessions run the status line. The idle one still holds 19% used and re-sends it every
+        # refresh; the active one has just seen 20%. The widget must never flick back to 19%.
+        resets = int(time.time()) + 3600
+        week = int(time.time()) + 5 * 86400
+
+        def feed(five_hour_pct, five_hour_resets, week_pct=30.0):
+            return self.run_feed(json.dumps({"rate_limits": {
+                "five_hour": {"used_percentage": five_hour_pct, "resets_at": five_hour_resets},
+                "seven_day": {"used_percentage": week_pct, "resets_at": week}}}))
+
+        def stored():
+            with open(self.feed, encoding="utf-8") as handle:
+                return {n: w["pct"] for n, w in json.load(handle)["windows"].items()}
+
+        feed(20, resets)
+        feed(19, resets)                              # stale: same window, lower usage
+        self.assertEqual(stored()["five_hour"], 20)
+        feed(21, resets)                              # newer reading
+        self.assertEqual(stored()["five_hour"], 21)
+        feed(19, resets - 18000)                      # a session still on the PREVIOUS window
+        self.assertEqual(stored()["five_hour"], 21)
+        feed(3, resets + 18000)                       # the window reset: low usage, later reset time
+        self.assertEqual(stored()["five_hour"], 3)
+        self.assertEqual(stored()["seven_day"], 30)   # the other window rode along untouched
+
+        # A window the incoming session does not report is kept, not dropped.
+        self.run_feed(json.dumps({"rate_limits": {"five_hour": {"used_percentage": 4, "resets_at": resets + 18000}}}))
+        self.assertEqual(sorted(stored()), ["five_hour", "seven_day"])
+
     def test_orphaned_temp_files_from_cancelled_runs_are_swept(self):
         stale, fresh = make_temp_files(self.state)
         self.run_feed(json.dumps({"rate_limits": {"five_hour": {"used_percentage": 5, "resets_at": int(time.time()) + 60}}}))
@@ -107,6 +137,18 @@ class WindowsFeed(unittest.TestCase):
                          [("five_hour", 76.5), ("seven_day", 58.8)])
         self.assertFalse(os.path.exists(stale))
         self.assertTrue(os.path.exists(fresh))
+
+        # A stale session (same window, lower usage) must not win; a newer reading must.
+        for pct, expect_left in ((20.0, 76.5), (30.0, 70.0)):
+            again = json.dumps({"rate_limits": {"five_hour": {"used_percentage": pct, "resets_at": resets}}})
+            done = subprocess.run([SHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", WINDOWS_FEED], input=again,
+                                  capture_output=True, text=True, timeout=120,
+                                  env=dict(os.environ, LOCALAPPDATA=self.local_app_data))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            limits = cu.read_rate_limits(os.path.join(self.state, "ratelimits.json"))
+            by_name = {w["name"]: round(w["left"], 1) for w in limits["windows"]}
+            self.assertEqual(by_name["five_hour"], expect_left, "pct %s" % pct)
+            self.assertEqual(by_name["seven_day"], 58.8, "the unreported window must be kept")
 
 
 if __name__ == "__main__":

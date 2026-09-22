@@ -66,11 +66,38 @@ if ($null -ne $j) {
     # response) never blanks out a good reading from another session.
     if ($windows.Count -gt 0) {
         try {
-            $feed = @{ updated = [long]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()); windows = $windows }
             $dest = Join-Path $dir 'ratelimits.json'
-            $tmp  = Join-Path $dir ('ratelimits.{0}.tmp' -f $PID)
-            [System.IO.File]::WriteAllText($tmp, ($feed | ConvertTo-Json -Depth 5 -Compress))
-            Move-Item -LiteralPath $tmp -Destination $dest -Force     # swap in one step so readers never see half a file
+
+            # Several Claude Code sessions run this at once, each sending the limits IT last received.
+            # An idle session keeps re-sending an older number every refresh, which used to overwrite
+            # the newer one and make the widget flick back and forth. So merge per window and only
+            # accept a reading that is at least as new: a later reset time means a new window; the
+            # same reset time with a higher (or equal) used percentage means a later reading, because
+            # usage can only rise until the window resets.
+            $merged = @{}
+            $stored = $null
+            try { if (Test-Path -LiteralPath $dest) { $stored = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $dest -Raw) } } catch { $stored = $null }
+            if ($null -ne $stored -and $null -ne $stored.windows) {
+                foreach ($prop in $stored.windows.PSObject.Properties) {
+                    if ($null -ne $prop.Value -and $null -ne $prop.Value.pct) {
+                        $merged[$prop.Name] = @{ pct = [double]$prop.Value.pct; resets = [long]$prop.Value.resets }
+                    }
+                }
+            }
+            $accepted = 0
+            foreach ($name in @($windows.Keys)) {
+                $incoming = $windows[$name]
+                $current = $merged[$name]
+                $newer = ($null -eq $current) -or ($incoming.resets -gt $current.resets) -or
+                         (($incoming.resets -eq $current.resets) -and ($incoming.pct -ge $current.pct))
+                if ($newer) { $merged[$name] = $incoming; $accepted++ }
+            }
+            if ($accepted -gt 0) {
+                $feed = @{ updated = [long]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()); windows = $merged }
+                $tmp  = Join-Path $dir ('ratelimits.{0}.tmp' -f $PID)
+                [System.IO.File]::WriteAllText($tmp, ($feed | ConvertTo-Json -Depth 5 -Compress))
+                Move-Item -LiteralPath $tmp -Destination $dest -Force     # swap in one step so readers never see half a file
+            }
         } catch { }
     }
 }

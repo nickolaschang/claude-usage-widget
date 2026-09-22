@@ -22,6 +22,33 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from claude_usage import state_dir, sweep_stale_temp_files, write_atomic  # noqa: E402
 
 
+def read_stored_windows(path):
+    try:
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            stored = json.load(handle)["windows"]
+        return {name: {"pct": float(w["pct"]), "resets": int(w.get("resets") or 0)}
+                for name, w in stored.items() if isinstance(w, dict) and w.get("pct") is not None}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def merge_windows(stored, incoming):
+    """Several Claude Code sessions run the status line at once, each sending the limits IT last
+    received. An idle session keeps re-sending an older number every refresh, which used to
+    overwrite the newer one and make the widget flick back and forth. So merge per window and only
+    accept a reading that is at least as new: a later reset time means a new window; the same reset
+    time with a higher (or equal) used percentage means a later reading, because usage can only rise
+    until the window resets. Returns (merged windows, how many incoming windows were accepted)."""
+    merged = dict(stored)
+    accepted = 0
+    for name, new in incoming.items():
+        old = merged.get(name)
+        if old is None or new["resets"] > old["resets"] or (new["resets"] == old["resets"] and new["pct"] >= old["pct"]):
+            merged[name] = new
+            accepted += 1
+    return merged, accepted
+
+
 def main():
     raw = sys.stdin.read()
     try:
@@ -65,8 +92,10 @@ def main():
         # response) never blanks out a good reading from another session.
         if windows:
             try:
-                write_atomic(os.path.join(folder, "ratelimits.json"),
-                             json.dumps({"updated": int(time.time()), "windows": windows}, separators=(",", ":")))
+                path = os.path.join(folder, "ratelimits.json")
+                merged, accepted = merge_windows(read_stored_windows(path), windows)
+                if accepted:
+                    write_atomic(path, json.dumps({"updated": int(time.time()), "windows": merged}, separators=(",", ":")))
             except OSError:
                 pass
 
