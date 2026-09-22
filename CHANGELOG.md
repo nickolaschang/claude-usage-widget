@@ -3,6 +3,15 @@
 The version here, the `version` in `.claude-plugin/plugin.json`, and the release tag always match.
 Claude Code pins plugin users to that version string, so it is bumped on every release.
 
+## 0.2.3
+
+- Documented what works where. The cost and token rows work for every local Claude Code
+  session, including the desktop app's chat window. The limit rows need the status line, which
+  only terminal sessions run: desktop app and VS Code extension users open one terminal session
+  (the desktop app's built-in terminal counts) and send a message, and the widget keeps that
+  reading until the next one. Cloud sessions leave nothing on disk and are invisible. The
+  `status` and `setup` skills now explain this too.
+
 ## 0.2.2
 
 - **Renamed to `usage-widget`.** The repository is now `nickolaschang/usage-widget` (the old
