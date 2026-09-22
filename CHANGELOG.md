@@ -3,6 +3,14 @@
 The version here, the `version` in `.claude-plugin/plugin.json`, and the release tag always match.
 Claude Code pins plugin users to that version string, so it is bumped on every release.
 
+## 0.2.4
+
+- **Fixed: the limit rows flicking back to an older number.** Several Claude Code sessions run
+  the status line at once, each with the limits it last received, and an idle session kept
+  re-sending an older reading every refresh, overwriting the newer one. The feed writers now merge
+  per window and only accept a reading that is at least as new (a later reset time, or the same
+  reset time with equal or higher usage). Both editions.
+
 ## 0.2.3
 
 - Documented what works where. The cost and token rows work for every local Claude Code
