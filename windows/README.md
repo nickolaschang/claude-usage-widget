@@ -82,6 +82,9 @@ State lives in `%LOCALAPPDATA%\ClaudeUsageWidget`.
   or not a Pro or Max login).
 - Test the status line command from Git Bash, not from inside a PowerShell window. A PowerShell
   session passes its own execution policy to child processes, which hides the problem.
+- No limit rows and you use the Claude Code desktop app: its chat window does not run the status
+  line. Open one terminal session (`claude` in any terminal, or the app's built-in terminal) and
+  send a message. The cost rows do not have this problem, they work for desktop app sessions too.
 
 ## Uninstall
 

@@ -157,6 +157,9 @@ State lives in `~/Library/Application Support/ClaudeUsageWidget` on macOS and
 - No limit rows: check `statusline-last-input.json` in the state folder. If that file never
   appears, the status line command is not running. If it appears without a `rate_limits` object,
   Claude Code is not reporting limits for that session.
+- No limit rows and you use the Claude Code desktop app: its chat window does not run the status
+  line. Open one terminal session (`claude` in any terminal, or the app's built-in terminal) and
+  send a message. The cost rows do not have this problem, they work for desktop app sessions too.
 
 ## Uninstall
 

@@ -25,8 +25,11 @@ up, changes only the `statusLine` key, and leaves every other setting alone.
 What the exit codes mean:
 
 - `0`: installed, or already installed. Tell the user the limit rows appear within about 30
-  seconds of their next Claude Code response, and that they need a Pro or Max login (API key
-  sessions are not given limit data). Mention where the backup of `settings.json` was written.
+  seconds of their next Claude Code response **in a terminal session**, and that they need a Pro
+  or Max login (API key sessions are not given limit data). The desktop app's chat window and the
+  VS Code extension do not run the status line, so a user who lives there needs to open one
+  terminal session (the desktop app's built-in terminal counts) and send a message. Mention where
+  the backup of `settings.json` was written.
 - `2`: the user **already has a status line of their own**, and the script refused to replace it.
   Stop and tell them. They have two choices: keep theirs and copy the feed-writing part of
   `Write-RateLimitFeed.ps1` (Windows) or `ratelimit_feed.py` (macOS, Linux) into it, or replace

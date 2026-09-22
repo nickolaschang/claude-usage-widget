@@ -107,6 +107,27 @@ runs. Once the last reading is more than 15 minutes old the widget says so. A wi
 time has passed shows as 100% left. Usage from your other devices shows up after the next reading
 on this machine.
 
+## Terminal, desktop app, IDE, cloud: what works where
+
+The two halves of the widget have different sources, so they work on different surfaces.
+
+| You use Claude Code in | Cost and token rows | 5 hour and weekly limit rows |
+| --- | --- | --- |
+| The terminal (`claude`), including the JetBrains plugin and the desktop app's built-in terminal | Yes | Yes |
+| The desktop app's own chat window, local session | Yes | Not on its own, see below |
+| The VS Code extension | Not documented by Anthropic, please report what you see | Not on its own, see below |
+| Cloud sessions (claude.ai/code, the desktop app's Cloud option, routines) | No, nothing is on your disk | No |
+
+The cost rows read the session transcripts that every local Claude Code session writes, and
+Anthropic documents that local desktop app sessions write theirs to the same folder.
+
+The limit rows come from the status line, and the status line is a terminal feature: the desktop
+app's chat window does not run your `statusLine` command, so it never produces the feed. The fix
+is easy. Open one terminal session (a normal `claude` in any terminal, or the desktop app's own
+terminal) and send one message. The feed is written, and the widget keeps showing that reading,
+with a "limits as of" note once it is older than 15 minutes, until the next terminal session
+refreshes it. If you only ever use the desktop app's chat window, the limit rows stay hidden.
+
 ## Privacy
 
 - No network requests. The widget only reads files on your own disk.

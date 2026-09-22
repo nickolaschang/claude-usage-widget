@@ -50,6 +50,11 @@ under `~/.claude/projects` and an optional status line feed. It makes no network
    Windows `%LOCALAPPDATA%\ClaudeUsageWidget`, macOS `~/Library/Application Support/ClaudeUsageWidget`,
    Linux `${XDG_STATE_HOME:-~/.local/state}/claude-usage-widget`.
    No limits are reported for API key logins, only Pro and Max subscriptions.
+   The status line only runs in terminal sessions. If the user works in the Claude Code desktop
+   app's chat window (or the VS Code extension), the feed is never written there: have them open
+   one terminal session, including the desktop app's built-in terminal, and send a message. The
+   cost rows are unaffected, because local desktop app sessions write transcripts to the same
+   folder. Cloud sessions (claude.ai/code, the desktop app's Cloud option) leave nothing on disk.
 7. **Ask before adding autostart.** Recipes are in the edition READMEs.
 
 Things that will waste your time if you do not know them:

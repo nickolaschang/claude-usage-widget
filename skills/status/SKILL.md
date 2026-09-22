@@ -31,6 +31,11 @@ How to read it:
   Code sent: if that file is missing, the status line command is not running; if it is there
   without a `rate_limits` object, Claude Code is not reporting limits for this session. That file
   contains local paths and the session id, so do not paste it anywhere public.
+- **The user works in the Claude Code desktop app's chat window or the VS Code extension** - those
+  do not run the status line, so the feed is never written there. The cost rows still work (local
+  desktop app sessions write transcripts to the same folder). To get the limit rows, they open one
+  terminal session (`claude` in any terminal, or the desktop app's built-in terminal) and send a
+  message; the widget then keeps that reading until the next terminal session refreshes it.
 
 If the widget is running but the user cannot see it, it may be parked on another monitor or
 behind something: `stop` then `start` brings it back on screen.
